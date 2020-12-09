@@ -5,6 +5,9 @@
 //                  4                        --  Mode select input (low = 12 hour mode, high = 24 hour mode)
 //                  3                        --  Sync LED (lit if NTP is stable)
 //                  6                        --  WiFi connected (built-in led lit if connected)
+//                  7                        --  Beeper for hourly chimes in morse code
+//                  8                        --  Disable hourly chimes input (low to disable)
+//                  9                        --  Time-in-morse input (low to send time in morse code)
 //
 
 #include <NTPClient.h>
@@ -36,6 +39,8 @@
 
 #define MAX_COLS        6         // Number of columns in display      
 #define MAX_ROWS        4         // Number of rows in display
+
+#define MORSE_DELAY     80        // Dot period for morse code chime (T=1200/WPM)
 
 #ifdef __USE_DEFAULTS
 
@@ -130,6 +135,9 @@ ledDisplay_t ledDisplay =
     0,                                          // current column selection
 };
 
+int morseTimePin = 9;                           // Ground to send time in morse
+int disChimePin = 8;                            // Ground to disable chimes
+int chimePin = 7;                               // Hourly chimes output
 int dateTimePin = 5;                            // Ground to show date instead of time
 int modeSelectPin = 4;                          // 12 or 24hr mode
 int syncLedPin = 3;                             // LED lights when sync'd
@@ -177,6 +185,9 @@ char serialBuff[SERBUFF_LEN];
 char *paramPtr;
 
 unsigned long int interruptCount;
+
+boolean chime;
+int morse[10] = { 0x00, 0x01, 0x03, 0x07, 0x0f, 0x1f, 0x1e, 0x1c, 0x18, 0x10 };
 
 void initDisplay()
 {
@@ -232,6 +243,78 @@ void displayInterrupt()
     digitalWrite(ledDisplay.colSelectPins[ledDisplay.colSelect], HIGH);
 }
 
+void splitDigit(int x, int *digPtr)
+{
+    *digPtr = (x / 10);
+    digPtr++;
+    *digPtr = (x % 10);
+}
+
+void sendMorseChar(int ch)
+{
+    int c;
+    int dashDelay;
+    int dotDelay;
+    int morseChar;
+
+    morseChar = morse[ch];
+    
+    dashDelay = 3 * MORSE_DELAY;
+
+    for(c = 0; c < 5; c++)
+    {
+        digitalWrite(chimePin, HIGH);
+        if((morseChar & 0x01) == 0x01)
+        {
+            delay(dotDelay);
+        }
+        else
+        {
+            delay(dashDelay);
+        }
+        digitalWrite(chimePin, LOW);
+
+        delay(dotDelay);  // inter-symbol delay
+
+        morseChar = morseChar >> 1;
+    }
+}
+
+void chimeMorse(int num)
+{
+    int x[2];
+
+    splitDigit(num, x);
+
+    sendMorseChar(x[0]);
+    delay(2 * MORSE_DELAY);  // inter-character delay
+    sendMorseChar(x[1]);
+}
+
+void timeInMorse()
+{
+    int c;
+
+    for(c = 0; c < 4; c++)
+    {
+        // Top bit of hours might be set to show PM
+        if(c == 0)
+        {
+            sendMorseChar(ledDisplay.data[c] * 0x03);
+        }
+        else
+        {
+            sendMorseChar(ledDisplay.data[c]);
+        }
+
+        // Wait "word space" between hours and minutes
+        if(c == 1)
+        {
+            delay(6 * MORSE_DELAY);
+        }
+    }
+}
+
 void printWifiStatus()
 {
   long rssi;
@@ -262,13 +345,6 @@ void printWifiStatus()
       Serial.print("  Gateway   : ");
       Serial.println(gway);
   }
-}
-
-void splitDigit(int x, int *hi)
-{
-    *hi = (x / 10);
-    hi++;
-    *hi = (x % 10);
 }
 
 int splitTime(time_t epoch, timeNow_t *timeStruct)
@@ -309,10 +385,10 @@ void ledShowTime(timeNow_t *timeStruct)
 
 void ledShowDate(timeNow_t *timeStruct)
 {
-    ledDisplay.data[0] = 0;
-    splitDigit(timeStruct -> tm_mday, &ledDisplay.data[1]);
-    splitDigit(timeStruct -> tm_mon, &ledDisplay.data[3]);
-    ledDisplay.data[5] = 0;
+    splitDigit(timeStruct -> tm_mday, &ledDisplay.data[0]);
+    ledDisplay.data[2] = 0;
+    ledDisplay.data[3] = 0;
+    splitDigit(timeStruct -> tm_mon, &ledDisplay.data[4]);
 }
 
 void serialShowTime(timeNow_t *timeStruct, char *timeName)
@@ -533,6 +609,26 @@ void cmdShowState()
         r = r << 1;
     }
     Serial.print(")\n");
+    
+    Serial.print("Mode: ");
+    if(digitalRead(modeSelectPin) == LOW)
+    {
+        Serial.println("12 hour");
+    }
+    else
+    {
+        Serial.println("24 hour");
+    }
+    
+    Serial.print("Display: ");
+    if(digitalRead(dateTimePin) == LOW)
+    {
+        Serial.println("Date");
+    }
+    else
+    {
+        Serial.println("Time");
+    }
 }
 
 // List all available commands
@@ -681,8 +777,15 @@ void setup()
     // GPIO
     pinMode(LED_BUILTIN, OUTPUT);
     pinMode(syncLedPin, OUTPUT);
+    pinMode(chimePin, OUTPUT);
+    pinMode(disChimePin, INPUT_PULLUP);
     pinMode(modeSelectPin, INPUT_PULLUP);
     pinMode(dateTimePin, INPUT_PULLUP);
+    pinMode(morseTimePin, INPUT_PULLUP);
+
+    digitalWrite(syncLedPin, LOW);
+    digitalWrite(chimePin, LOW);
+    digitalWrite(LED_BUILTIN, LOW);
 
     // LED display
     initDisplay();
@@ -729,6 +832,7 @@ void setup()
 
     reSyncCount = 0;
     reachability = 0;
+    chime = true;
 }
 
 void loop()
@@ -829,7 +933,30 @@ void loop()
           }
           else
           {
+              Serial.println("Show date");
               ledShowDate(&timeNow);
+          }
+
+          // Chime on the hour
+          if(digitalRead(disChimePin) == HIGH)
+          {
+              if(timeNow.tm_min == 0)
+              {
+                  if(chime == true)
+                  {
+                      chimeMorse(timeNow.tm_hour);
+                      chime = false;
+                  }
+              }
+              else
+              {
+                  chime = true;
+              }
+          }   
+
+          if(digitalRead(morseTimePin) == LOW)
+          {
+              timeInMorse();
           }
 
           break;
