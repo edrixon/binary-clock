@@ -191,22 +191,22 @@ int morse[10] = { 0x00, 0x01, 0x03, 0x07, 0x0f, 0x1f, 0x1e, 0x1c, 0x18, 0x10 };
 
 void initDisplay()
 {
-  int c;
+    int c;
 
-  for(c = 0; c < MAX_ROWS; c++)
-  {
-      pinMode(ledDisplay.rowDataPins[c], OUTPUT);
-      digitalWrite(ledDisplay.rowDataPins[c], LOW);
-  }
+    for(c = 0; c < MAX_ROWS; c++)
+    {
+        pinMode(ledDisplay.rowDataPins[c], OUTPUT);
+        digitalWrite(ledDisplay.rowDataPins[c], LOW);
+    }
 
-  for(c = 0; c < MAX_COLS; c++)
-  {
-      ledDisplay.data[c] = 0;
-      pinMode(ledDisplay.colSelectPins[c], OUTPUT);
-      digitalWrite(ledDisplay.colSelectPins[c], LOW);
-  }
+    for(c = 0; c < MAX_COLS; c++)
+    {
+        ledDisplay.data[c] = 0;
+        pinMode(ledDisplay.colSelectPins[c], OUTPUT);
+        digitalWrite(ledDisplay.colSelectPins[c], LOW);
+    }
 
-  ledDisplay.colSelect = 0;
+    ledDisplay.colSelect = 0;
 }
 
 void displayInterrupt()
@@ -254,7 +254,6 @@ void sendMorseChar(int ch)
 {
     int c;
     int dashDelay;
-    int dotDelay;
     int morseChar;
 
     morseChar = morse[ch];
@@ -266,7 +265,7 @@ void sendMorseChar(int ch)
         digitalWrite(chimePin, HIGH);
         if((morseChar & 0x01) == 0x01)
         {
-            delay(dotDelay);
+            delay(MORSE_DELAY);
         }
         else
         {
@@ -274,21 +273,18 @@ void sendMorseChar(int ch)
         }
         digitalWrite(chimePin, LOW);
 
-        delay(dotDelay);  // inter-symbol delay
+        delay(MORSE_DELAY);  // inter-symbol delay
 
         morseChar = morseChar >> 1;
     }
+    
+    delay(2 * MORSE_DELAY);
 }
 
-void chimeMorse(int num)
+void chimeMorse()
 {
-    int x[2];
-
-    splitDigit(num, x);
-
-    sendMorseChar(x[0]);
-    delay(2 * MORSE_DELAY);  // inter-character delay
-    sendMorseChar(x[1]);
+    sendMorseChar(ledDisplay.data[0] & 0x03);
+    sendMorseChar(ledDisplay.data[1]);
 }
 
 void timeInMorse()
@@ -300,7 +296,7 @@ void timeInMorse()
         // Top bit of hours might be set to show PM
         if(c == 0)
         {
-            sendMorseChar(ledDisplay.data[c] * 0x03);
+            sendMorseChar(ledDisplay.data[c] & 0x03);
         }
         else
         {
@@ -310,7 +306,7 @@ void timeInMorse()
         // Wait "word space" between hours and minutes
         if(c == 1)
         {
-            delay(6 * MORSE_DELAY);
+            delay(3 * MORSE_DELAY);
         }
     }
 }
@@ -799,6 +795,10 @@ void setup()
     // Display a pattern
     initDisplayPattern();
 
+    digitalWrite(chimePin, HIGH);
+    delay(100);
+    digitalWrite(chimePin, LOW);
+
 #ifndef __TEST_DISPLAY
 
     // Read configuration from flash memory
@@ -944,7 +944,7 @@ void loop()
               {
                   if(chime == true)
                   {
-                      chimeMorse(timeNow.tm_hour);
+                      chimeMorse();
                       chime = false;
                   }
               }
