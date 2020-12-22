@@ -1,13 +1,13 @@
 //
 //                 A0, A1, A2, A3, A4, A5    --  Display column select lines (hh mm ss)
 //                 A6,  0,  1,  2            --  Display LED select lines (lsb first)
-//                  5                        --  Show date or time input (low = date, high = time)
+//                  3                        --  Sync LED (low = initialising, high = NTP is stable)
 //                  4                        --  Mode select input (low = 12 hour mode, high = 24 hour mode)
-//                  3                        --  Sync LED (lit if NTP is stable)
+//                  5                        --  Show date or time input (low = date, high = time)
 //                  6                        --  WiFi connected (built-in led lit if connected)
 //                  7                        --  Beeper for hourly chimes in morse code
-//                  8                        --  Disable hourly chimes input (low to disable)
-//                  9                        --  Time-in-morse input (low to send time in morse code)
+//                  8                        --  Hourly chimes input (low = no chimes, high = hourly morse code chime)
+//                  9                        --  Time-in-morse input (low = send time in morse code)
 //
 
 #include <NTPClient.h>
@@ -17,10 +17,14 @@
 #include <Timezone.h>
 #include <FlashStorage.h>
 
+#include <driver/source/nmasic.h>
+
 #include "Timer5.h"
 
 //#define __TEST_DISPLAY            // Just do display test and nothing else...
-#define __USE_DEFAULTS             // Load default configuration if nothing else already stored.  Otherwise, boot to CLI for user configuration
+#define __USE_DEFAULTS            // Load default configuration if nothing else already stored.  Otherwise, boot to CLI for user configuration
+#define __WITH_TELNET             // To allow telnet connection for a status page
+#define __WITH_HTTP               // To enable configuration web page
 
 #define HELLO_STR       "** Ed's NTP clock **"
 
@@ -51,6 +55,25 @@
 
 #endif
 
+#ifdef __WITH_HTTP
+
+// HTTP GET request handlers
+typedef struct
+{
+    char *fileName;
+    void (*fn)(void);
+} getRequestType;
+
+
+// HTTP parameter setting handlers
+typedef struct
+{
+    char *paramName;
+    void (*fn)(char *);
+} httpParamType;
+
+#endif
+
 // CLI function prototypes
 void cmdClearConfig(void);
 void cmdSaveConfig(void);
@@ -61,6 +84,8 @@ void cmdNtpServer(void);
 void cmdListCommands(void);
 void cmdShowState(void);
 void cmdDisplay(void);
+void cmdWebConfig(void);
+void cmdWiFiVersion(void);
 
 // CLI command
 typedef struct
@@ -86,8 +111,8 @@ typedef struct
 // Configuration data
 typedef struct
 {
-    char ssid[32];
-    char password[32];
+    char ssid[40];
+    char password[70];
     char ntpServer[32];
     unsigned long int eepromValid;
 } eepromData;
@@ -122,6 +147,14 @@ const char *dayStrings[] =
     "Friday",
     "Saturday"
 };
+
+#ifdef __WITH_TELNET
+WiFiServer ws(23);
+#endif
+
+#ifdef __WITH_HTTP
+WiFiServer httpServer(80);
+#endif
 
 eepromData clockConfig;
 FlashStorage(savedConfig, eepromData);
@@ -176,6 +209,10 @@ cmdType cmdList[] =
     { "save",      cmdSaveConfig },
     { "show",      cmdShowState },
     { "ssid",      cmdSsid },
+#ifdef __WITH_HTTP
+    { "webconfig", cmdWebConfig },
+#endif
+    { "wifiver",   cmdWiFiVersion },
     { "?",         cmdListCommands },
     { NULL,        NULL }
 };
@@ -187,8 +224,44 @@ char *paramPtr;
 unsigned long int interruptCount;
 
 boolean chime;
+
+#ifdef __WITH_HTTP
+
+WiFiClient httpClient;
+char *httpParams[16];
+char httpRequest[255];
+boolean httpDone;
+
+void httpResetConfiguration();
+void httpSaveConfiguration();
+void httpConfigPage();
+void httpSetSsid(char *);
+void httpSetPassword(char *);
+void httpSetNtpServer(char *);
+
+getRequestType getRequests[] =
+{
+    { "/reset.html", httpResetConfiguration },
+    { "/config.html", httpSaveConfiguration },
+    { "/", httpConfigPage },
+    { NULL, NULL }
+};
+
+httpParamType httpParamHandlers[] =
+{
+    { "ssid", httpSetSsid },
+    { "password", httpSetPassword },
+    { "ntpserver", httpSetNtpServer },
+    { NULL, NULL }
+};
+
+#endif
+
+// Morse characters 0-9
+// To send, clock out 5 bits, LSB first - if LSB is '1', send a dot, otherwise, send a dash
 int morse[10] = { 0x00, 0x01, 0x03, 0x07, 0x0f, 0x1f, 0x1e, 0x1c, 0x18, 0x10 };
 
+// Initialise display
 void initDisplay()
 {
     int c;
@@ -209,6 +282,7 @@ void initDisplay()
     ledDisplay.colSelect = 0;
 }
 
+// Interrupt handler for display timer
 void displayInterrupt()
 {
     int c;
@@ -241,6 +315,29 @@ void displayInterrupt()
     }
 
     digitalWrite(ledDisplay.colSelectPins[ledDisplay.colSelect], HIGH);
+}
+
+// Convert a number to binary in ASCII
+void binToStr(int bin, char *str)
+{
+    int c;
+
+    for(c = 0; c < 8; c++)
+    {
+        if((bin & 0x80) == 0x80)
+        {
+            *str = '1';
+        }
+        else
+        {
+            *str = '0';
+        }
+
+        str++;
+        bin = bin << 1;
+    }
+
+    *str = '\0';
 }
 
 void splitDigit(int x, int *digPtr)
@@ -313,34 +410,34 @@ void timeInMorse()
 
 void printWifiStatus()
 {
-  long rssi;
-  IPAddress ip;
-  IPAddress mask;
-  IPAddress gway;
-  char wifiStr[32];
+    long rssi;
+    IPAddress ip;
+    IPAddress mask;
+    IPAddress gway;
+    char wifiStr[32];
   
-  if(WiFi.status() != WL_CONNECTED)
-  {
-      Serial.println("Wifi disconnected");
-  }
-  else
-  {
-      ip = WiFi.localIP();
-      mask = WiFi.subnetMask();
-      gway = WiFi.gatewayIP();
-      rssi = WiFi.RSSI();
+    if(WiFi.status() != WL_CONNECTED)
+    {
+        Serial.println("Wifi disconnected");
+    }
+    else
+    {
+        ip = WiFi.localIP();
+        mask = WiFi.subnetMask();
+        gway = WiFi.gatewayIP();
+        rssi = WiFi.RSSI();
 
-      sprintf(wifiStr, "Wifi connected to %s\n", clockConfig.ssid);
-      Serial.print(wifiStr);
-      sprintf(wifiStr, "  RSSI      : %d dBm\n", rssi);
-      Serial.print(wifiStr);
-      Serial.print("  IP        : ");
-      Serial.println(ip);
-      Serial.print("  Netmask   : ");
-      Serial.println(mask);
-      Serial.print("  Gateway   : ");
-      Serial.println(gway);
-  }
+        Serial.print("Wifi connected to ");
+        Serial.println(clockConfig.ssid);
+        sprintf(wifiStr, "  RSSI      : %d dBm\n", rssi);
+        Serial.print(wifiStr);
+        Serial.print("  IP        : ");
+        Serial.println(ip);
+        Serial.print("  Netmask   : ");
+        Serial.println(mask);
+        Serial.print("  Gateway   : ");
+        Serial.println(gway);
+    }
 }
 
 int splitTime(time_t epoch, timeNow_t *timeStruct)
@@ -421,6 +518,7 @@ boolean getClockConfig()
     else
     {
 #ifdef __USE_DEFAULTS
+        Serial.println("No configuration found - loading defaults");
         strcpy(clockConfig.ssid, DEFAULT_SSID);
         strcpy(clockConfig.password, DEFAULT_PSWD);
         strcpy(clockConfig.ntpServer, DEFAULT_NTPS);
@@ -510,7 +608,7 @@ void cmdSsid()
 {
     if(paramPtr != NULL)
     {
-         strncpy(clockConfig.ssid, paramPtr, 32);
+         strncpy(clockConfig.ssid, paramPtr, 40);
     }
 
     Serial.print("SSID: ");
@@ -546,7 +644,7 @@ void cmdPassword()
 {
     if(paramPtr != NULL)
     {
-        strncpy(clockConfig.password, paramPtr, 32);
+        strncpy(clockConfig.password, paramPtr, 64);
     }
 
     Serial.print("Password: ");
@@ -569,8 +667,6 @@ void cmdNtpServer()
 void cmdShowState()
 {
     char tmpStr[32];
-    int c;
-    unsigned char r;
     
     printWifiStatus();
 
@@ -581,31 +677,22 @@ void cmdShowState()
     Serial.println(clockConfig.password);
     Serial.print("  NTP server: ");
     Serial.println(clockConfig.ntpServer);
-
     Serial.print("\n");
+    
     Serial.print("Interrupt count: ");
     Serial.print(interruptCount);
     Serial.print("\n");
 
-    r = reachability;
-    sprintf(tmpStr, "Reachability: 0x%02x (0b", r, r);
+    sprintf(tmpStr, "Reachability: 0x%02x (0b", reachability);
     Serial.print(tmpStr);
-
-    for(c = 0; c < 8; c++)
-    {
-        if((r & 0x80) == 0x80)
-        {
-            Serial.print("1");
-        }
-        else
-        {
-            Serial.print("0");
-        }
-        
-        r = r << 1;
-    }
+    binToStr(reachability, tmpStr);
+    Serial.print(tmpStr);
     Serial.print(")\n");
-    
+
+    Serial.print("Resync count: ");
+    Serial.print(reSyncCount);
+    Serial.println(" today");
+        
     Serial.print("Mode: ");
     if(digitalRead(modeSelectPin) == LOW)
     {
@@ -624,6 +711,48 @@ void cmdShowState()
     else
     {
         Serial.println("Time");
+    }
+
+    Serial.print("Hourly chimes: ");
+    if(digitalRead(disChimePin) == HIGH)
+    {
+        Serial.println("Enabled");
+    }
+    else
+    {
+        Serial.println("Disabled");
+    }
+
+}
+
+void cmdWiFiVersion()
+{
+    String fv;
+    String latestFw;
+
+    fv = WiFi.firmwareVersion();
+
+    if(REV(GET_CHIPID()) >= REV_3A0)
+    {
+        latestFw = WIFI_FIRMWARE_LATEST_MODEL_B;
+    }
+    else
+    {
+        latestFw = WIFI_FIRMWARE_LATEST_MODEL_A;
+    }
+
+    Serial.print("Latest firmware: ");
+    Serial.println(latestFw);
+
+    Serial.print("Current verstion: ");
+    Serial.print(fv);
+    if(fv >= latestFw)
+    {
+        Serial.println(" (OK)");
+    }
+    else
+    {
+        Serial.println(" (REQUIRES UPDATE)");
     }
 }
 
@@ -691,6 +820,70 @@ void cli()
 
     Serial.print("CLI exit\n");
 }
+
+#ifdef __WITH_TELNET
+
+void telnetShowStatus(WiFiClient client)
+{
+    int c;
+    char buff[32];
+
+    client.println(HELLO_STR);
+
+    client.print("WiFi SSID: ");
+    client.println(clockConfig.ssid);
+
+    sprintf(buff, "Wifi RSSI: %d dBm", WiFi.RSSI());
+    client.println(buff);
+
+    client.println("Display data:");
+    for(c = 0; c < 6; c++)
+    {
+        sprintf(buff, "  Digit %d - 0x%02x - ", c, ledDisplay.data[c]);
+        client.print(buff);
+        binToStr(ledDisplay.data[c], buff);
+        client.println(buff);
+    }
+
+    client.print("NTP server: ");
+    client.println(clockConfig.ntpServer);
+
+    sprintf(buff, "Reachability: 0x%02x (0b", reachability);
+    client.print(buff);
+    binToStr(reachability, buff);
+    strcat(buff, ")");
+    client.println(buff);
+
+    sprintf(buff, "Hourly chimes: ");
+    if(digitalRead(disChimePin) == HIGH)
+    {
+        strcat(buff, "Enabled");
+    }
+    else
+    {
+        strcat(buff, "Disabled");
+    }
+    client.println(buff);
+
+    sprintf(buff, "Display mode: ");
+    if(digitalRead(modeSelectPin) == LOW)
+    {
+        strcat(buff, "12 hour");
+    }
+    else
+    {
+        strcat(buff, "24 hour");
+    }
+    client.println(buff);
+
+    sprintf(buff, "Interrupt count: %ld", interruptCount);
+    client.println(buff);
+
+    sprintf(buff, "Resync's today: %d", reSyncCount);
+    client.println(buff);
+}
+
+#endif
 
 #ifdef __TEST_DISPLAY
 
@@ -763,12 +956,436 @@ void initDisplayPattern()
     }
 }
 
+#ifdef __WITH_HTTP
+
+void httpStartAP()
+{
+    IPAddress ip;
+
+    Serial.println(" - Starting WiFi access point");
+  
+    // Start Wifi in AP mode
+    if(WiFi.beginAP("NTPClock") != WL_AP_LISTENING)
+    {
+        Serial.println(" - Failed");
+    }
+    delay(5000);
+
+    ip = WiFi.localIP();
+    Serial.print(" - IP address: ");
+    Serial.println(ip);
+}
+
+void httpHeader()
+{
+    httpClient.println("HTTP/1.1 200 OK");
+    httpClient.println("Content-type:text/html");
+    httpClient.println();
+  
+    httpClient.println("<html>");
+    httpClient.println("<body>");
+    
+    httpClient.println("<h2>NTP Clock configuration</h2>");  
+}
+
+void httpFooter()
+{
+    httpClient.println("<p><a href=\"/\">Back</a> to main page</p>");
+    httpClient.println("</body>");
+    httpClient.println("</html>");  
+}
+
+void httpConfigPage()
+{
+    httpHeader();
+    
+    httpClient.println("<form action=\"/config.html\">");
+    httpClient.println("<label for=\"ssid\">WiFi SSID:</label><br>");
+    httpClient.print("<input type=\"text\" id=\"ssid\" name=\"ssid\" value=\"");
+    httpClient.print(clockConfig.ssid);
+    httpClient.println("\"><br><br>");
+    httpClient.println("<label for=\"password\">WiFi Password:</label><br>");
+    httpClient.print("<input type=\"text\" id=\"password\" name=\"password\" value=\"");
+    httpClient.print(clockConfig.password);
+    httpClient.println("\"><br><br>");
+    httpClient.println("<label for=\"ntpserver\">NTP server:</label><br>");
+    httpClient.print("<input type=\"text\" id=\"ntpserver\" name=\"ntpserver\" value=\"");
+    httpClient.print(clockConfig.ntpServer);
+    httpClient.println("\"><br><br>");
+    httpClient.println("<input type=\"submit\" value=\"Save settings\">");
+    httpClient.println("</form>");
+
+    httpClient.println("<br>");
+
+    httpClient.println("<form action=\"/reset.html\">");
+    httpClient.println("<input type=\"submit\" value=\"Default settings\">");
+    httpClient.println("</form>");
+
+    httpClient.println("</body>");
+    httpClient.println("</html>");
+}
+
+void httpResetConfiguration()
+{
+    httpHeader();
+    httpClient.println("<p>Load default configuration</p>");
+    httpFooter();
+
+#ifdef __USE_DEFAULTS
+    strcpy(clockConfig.ssid, DEFAULT_SSID);
+    strcpy(clockConfig.password, DEFAULT_PSWD);
+    strcpy(clockConfig.ntpServer, DEFAULT_NTPS);
+#else
+    memset(&clockConfig, 0, sizeof(clockConfig));
+#endif
+}
+
+void httpSetSsid(char *ssid)
+{
+    strcpy(clockConfig.ssid, ssid); 
+}
+
+void httpSetPassword(char *password)
+{
+    strcpy(clockConfig.password, password);
+}
+
+void httpSetNtpServer(char *ntpServer)
+{
+    strcpy(clockConfig.ntpServer, ntpServer);
+}
+
+void httpParseParam(char *paramName, char *paramValue)
+{
+    int c;
+
+    Serial.print("Trying to set ");
+    Serial.print(paramName);
+    Serial.print(" to ");
+    Serial.println(paramValue);
+
+    c = 0;
+    while(httpParamHandlers[c].paramName != NULL && strcmp(httpParamHandlers[c].paramName, paramName) != 0)
+    {
+        c++;
+    }
+
+    if(httpParamHandlers[c].paramName != NULL)
+    {
+        httpParamHandlers[c].fn(paramValue);
+    }
+    else
+    {
+        Serial.print("Bad parameter");
+    }
+}
+
+void httpSaveConfiguration()
+{
+    int c;
+    char *paramName;
+    char *paramValue;
+    
+    httpHeader();
+    httpClient.println("<p>Load configuration:</p><br>");
+
+    for(c = 1; c < 4; c++)
+    {
+        paramName = strtok(httpParams[c], "=");
+        paramValue = strtok(NULL, "=");
+
+        httpClient.print("<p>Set ");
+        httpClient.print(paramName);
+        httpClient.print(" to ");
+        httpClient.print(paramValue);
+        httpClient.print("</p><br>");
+        
+        httpParseParam(paramName, paramValue);
+    }
+    
+    httpFooter();
+
+    saveClockConfig();
+    httpDone = true;
+}
+
+void httpNotFound()
+{
+    httpClient.println("HTTP/1.1 404 Not Found");
+}
+
+void httpHandleGetRequest(char *url)
+{
+    char *tokPtr;
+    char *filename;
+    int c;
+  
+    c = 0;
+
+    tokPtr = strtok(url, "?& ");
+    while(tokPtr != NULL)
+    {
+        httpParams[c] = tokPtr;
+        Serial.print("Param ");
+        Serial.print(c);
+        Serial.print(": ");
+        Serial.println(tokPtr);
+        c++;
+
+        tokPtr = strtok(NULL, "?& ");
+    }
+
+    c = 0;
+    while(getRequests[c].fileName != NULL && strcmp(getRequests[c].fileName, httpParams[0]) != 0)
+    {
+        c++;
+    }
+
+    if(getRequests[c].fileName == NULL)
+    {
+        httpNotFound();
+    }
+    else
+    {
+        getRequests[c].fn();
+    }
+}
+
+void httpWebServer()
+{
+    char c;
+    char *urlPtr;
+  
+    // Start webserver
+    httpServer.begin();
+
+    httpDone = false;
+    while(httpDone == false)
+    {
+        httpClient = httpServer.available();
+        if(httpClient)
+        {
+            urlPtr = httpRequest;
+            while(httpClient.connected())
+            {
+                if(httpClient.available())
+                {
+                    c = httpClient.read();
+                    if(c == '\n')
+                    {
+                        *urlPtr = '\0';
+
+                        Serial.println(httpRequest);
+                        
+                        if(strncmp(httpRequest, "GET", 3) == 0)
+                        {
+                            httpHandleGetRequest(&httpRequest[4]);
+                        }
+
+                        httpClient.flush();
+                        httpClient.stop();
+                    }
+                    else
+                    {
+                        if(c != '\r')
+                        {
+                            *urlPtr = c;
+                            urlPtr++;
+                        }
+                    }
+                }
+            }
+
+            Serial.println("Disconnected");
+        }
+    }
+}
+
+void httpStatusPage(char *url)
+{
+    char c;
+    char *filename;
+    char txtBuff[80];
+
+    filename = strtok(url, "?& ");
+    if(strcmp(filename, "/") != 0)
+    {
+        httpNotFound();
+    }
+    else
+    {
+        httpClient.println("HTTP/1.1 200 OK");
+        httpClient.println("Content-type:text/html\r\n");
+  
+        httpClient.println("<html>");
+
+        httpClient.println("<head>");
+        httpClient.println("<style>");
+        httpClient.println("table, th, td {");
+        httpClient.println("  border: 1px solid black;");
+        httpClient.println("  border-collapse: collapse;");
+        httpClient.println("  padding: 5px;");
+        httpClient.println("  text-align: left;");
+        httpClient.println("}");
+        httpClient.println("</style>");
+        httpClient.println("</head>");
+
+        httpClient.println("<body>");
+    
+        httpClient.println("<h2>NTP Clock Status</h2>");
+          
+        httpClient.println("<table>");
+        httpClient.println("  <tr>");
+        httpClient.println("    <th>Time</th>");
+        sprintf(txtBuff, "    <td>%02d:%02d:%02d</td>", timeNow.tm_hour, timeNow.tm_min, timeNow.tm_sec);
+        httpClient.println(txtBuff);
+        httpClient.println("  </tr>");
+        httpClient.println("  <tr>");
+        httpClient.println("    <th>Date</th>");
+        sprintf(txtBuff, "    <td>%02d/%02d/%04d</td>", timeNow.tm_mday, timeNow.tm_mon, timeNow.tm_year);
+        httpClient.println(txtBuff);
+        httpClient.println("  </tr>");
+        httpClient.println("</table>");
+
+        httpClient.println("<br>");
+        
+        httpClient.println("<table>");
+        httpClient.println("  <tr>");
+        httpClient.println("    <th>WiFi SSID</th>");
+        sprintf(txtBuff, "    <td>%s</td>", clockConfig.ssid);
+        httpClient.println(txtBuff);
+        httpClient.println("  </tr>");
+        httpClient.println("  <tr>");
+        httpClient.println("    <th>WiFi RSSI</th>");
+        sprintf(txtBuff, "    <td>%d dBm</td>", WiFi.RSSI());
+        httpClient.println(txtBuff);
+        httpClient.println("  </tr>");
+        httpClient.println("</table>");
+
+        httpClient.println("<br>");
+        
+        httpClient.println("<table>");
+        httpClient.println("  <tr>");
+        httpClient.println("    <th>NTP server</th>");
+        sprintf(txtBuff, "    <td>%s</td>", clockConfig.ntpServer);
+        httpClient.println(txtBuff);
+        httpClient.println("  </tr>");
+        httpClient.println("  <tr>");
+        httpClient.println("    <th>Reachability</th>");
+        sprintf(txtBuff, "    <td>0x%02x</td>", reachability);
+        httpClient.println(txtBuff);
+        httpClient.println("  </tr>");
+        httpClient.println("  <tr>");
+        httpClient.println("    <th>Re-syncs</th>");
+        sprintf(txtBuff, "    <td>%d</td>", reSyncCount);
+        httpClient.println(txtBuff);
+        httpClient.println("  </tr>");
+        httpClient.println("</table>");
+
+        httpClient.println("<br>");
+        
+        httpClient.println("<table>");
+        httpClient.println("  <tr>");
+        httpClient.println("    <th>Mode</th>");
+        if(digitalRead(dateTimePin) == LOW)
+        {
+            httpClient.println("    <td>12 hour</td>");
+        }
+        else
+        {
+            httpClient.println("    <td>24 hour</td>");          
+        }
+        httpClient.println("  </tr>");
+        httpClient.println("  <tr>");
+        httpClient.println("    <th>Hourly chimes</th>");
+        if(digitalRead(disChimePin) == HIGH)
+        {
+            httpClient.println("    <td>Enabled</td>");
+        }
+        else
+        {
+            httpClient.println("    <td>Disabled</td>");          
+        }
+        httpClient.println("  </tr>");
+        httpClient.println("</table>");
+
+        httpClient.println("<p>");
+        httpClient.println("Power up holding 'mode' or 'morse' button to enter configuration mode");
+        httpClient.println("</p>");
+        httpClient.println("<p>");
+        httpClient.println("Clock will start WiFi access point with SSID 'NTPclock'<br>");
+        httpClient.println("Connect to that to access configuration page at http://192.168.1.1");
+        httpClient.println("</p>");
+        httpClient.println("<p>");
+        httpClient.println("Configuration can also be done using CLI on serial port");
+        httpClient.println("</p>");
+
+        httpClient.println("</body>");
+        httpClient.println("</html>");  
+    }
+}
+
+void httpStatusGetRequest()
+{
+    char c;
+    char *urlPtr;
+
+    Serial.println("Client connected to webserver");
+  
+    urlPtr = httpRequest;
+    while(httpClient.connected())
+    {
+        if(httpClient.available())
+        {
+            c = httpClient.read();
+            if(c == '\n')
+            {
+                *urlPtr = '\0';
+
+                Serial.println(httpRequest);
+                        
+                if(strncmp(httpRequest, "GET", 3) == 0)
+                {
+                    httpStatusPage(&httpRequest[4]);
+                }
+
+                httpClient.flush();
+                httpClient.stop();
+            }
+            else
+            {
+                if(c != '\r')
+                {
+                    *urlPtr = c;
+                    urlPtr++;
+                }
+            }
+        }
+    }
+    
+    Serial.println("Disconnected");
+}
+
+void cmdWebConfig()
+{
+    Serial.println(" - Stopping WiFi client");
+    WiFi.end();
+    httpStartAP();
+    httpWebServer();
+    Serial.println(" - Stopping Wifi access point");
+    WiFi.end();
+}
+
+#endif
+
 void setup()
 {
     // Serial port
     Serial.begin(9600);
+    while(!Serial);
+    Serial.println();
     Serial.println(HELLO_STR);
-    Serial.print("\n");
+    Serial.println("");
 
     // GPIO
     pinMode(LED_BUILTIN, OUTPUT);
@@ -795,13 +1412,22 @@ void setup()
     // Display a pattern
     initDisplayPattern();
 
+    // One beep
     digitalWrite(chimePin, HIGH);
-    delay(100);
+    delay(MORSE_DELAY);
     digitalWrite(chimePin, LOW);
 
-#ifndef __TEST_DISPLAY
+#ifdef __TEST_DISPLAY
+
+    while(1)
+    {
+        testDisplay();
+    }
+
+#endif
 
     // Read configuration from flash memory
+    // Will use defaults if nothing found and compiled with __USE_DEFAULTS set
     while(getClockConfig() == false)
     {
         // If there's no configuration, display a "X" and start command line
@@ -812,6 +1438,7 @@ void setup()
         ledDisplay.data[4] = 5;
               
         Serial.println("No configuration found in FLASH!!");
+
         cli();
 
         ledDisplay.data[2] = 0;
@@ -821,15 +1448,7 @@ void setup()
     
     // State machine
     clockState = STATE_INIT;
-#endif
-
-#ifdef __TEST_DISPLAY
-    while(1)
-    {
-        testDisplay();
-    }
-#endif
-
+    
     reSyncCount = 0;
     reachability = 0;
     chime = true;
@@ -837,150 +1456,211 @@ void setup()
 
 void loop()
 {
-  time_t epoch;
-  TimeChangeRule *tcr;
+    time_t epoch;
+    TimeChangeRule *tcr;
+#ifdef __WITH_TELNET
+    WiFiClient wc;
+#endif
 
-  switch(clockState)
-  {
-      case STATE_INIT:
-          Serial.print("*** Initialising");
-          WiFi.begin(clockConfig.ssid, clockConfig.password);
-          digitalWrite(LED_BUILTIN, LOW);
-          digitalWrite(syncLedPin, LOW);
-          clockState = STATE_CONNECTING;
-          tickTime = INIT_TICKTIME;
-          reSyncCount++;
-          break;
+    switch(clockState)
+    {
+        case STATE_INIT:
+            Serial.println("*** Starting  ***");
+#ifdef __WITH_HTTP
+            if(digitalRead(morseTimePin) == LOW || digitalRead(dateTimePin) == LOW)
+            {
+                Serial.println(" - Web configuration mode");
+                httpStartAP();
+                httpWebServer();
+                WiFi.end();
+            }
+            else
+            {
+                Serial.println(" - Normal operation");
+#endif
+                WiFi.begin(clockConfig.ssid, clockConfig.password);
+                digitalWrite(LED_BUILTIN, LOW);
+                digitalWrite(syncLedPin, LOW);
+                clockState = STATE_CONNECTING;
+                tickTime = INIT_TICKTIME;
+                reSyncCount++;
+#ifdef __WITH_HTTP
+            }
+#endif
+            break;
 
-      case STATE_CONNECTING:
-          if(WiFi.status() == WL_CONNECTED)
-          {
-              Serial.println("");
-              Serial.println("*** Wifi connected");
-              printWifiStatus();
-              digitalWrite(LED_BUILTIN, HIGH);
-              Serial.print("*** Starting NTP - ");
-              Serial.println(clockConfig.ntpServer);
-              timeClient.setPoolServerName(clockConfig.ntpServer);
-              timeClient.setUpdateInterval(SYNC_UPDATE * 1000);
-              timeClient.begin(NTP_PORT);
-              clockState = STATE_TIMING;
-              updateTime = INIT_UPDATE;
-              ntpUpdates = 0;
-              ticks = 0;
-          }
-          else
-          {
-              Serial.print(".");
-          }
-          break;
+        case STATE_CONNECTING:
+            if(WiFi.status() == WL_CONNECTED)
+            {
+                Serial.println(" - Wifi connected");
+                printWifiStatus();
+                digitalWrite(LED_BUILTIN, HIGH);
+                Serial.print(" - Starting NTP - ");
+                Serial.println(clockConfig.ntpServer);
+                timeClient.setPoolServerName(clockConfig.ntpServer);
+                timeClient.setUpdateInterval(SYNC_UPDATE * 1000);
+                timeClient.begin(NTP_PORT);
+                clockState = STATE_TIMING;
+                updateTime = INIT_UPDATE;
+                ntpUpdates = 0;
+                ticks = 0;
+#ifdef __WITH_TELNET
+                ws.begin();
+                Serial.println(" - Telnet started");
+#endif
+#ifdef __WITH_HTTP
+                httpServer.begin();
+                Serial.println(" - Webserver started");
+                
+                // Only whilst testing...
+                // httpWebServer();
+#endif
+            }
+            else
+            {
+                Serial.print(".");
+            }
+            break;
 
-      case STATE_TIMING:
-          if(ticks == 0)
-          {              
-              if(WiFi.status() == WL_CONNECTED)
-              { 
-                  reachability = reachability << 1;
-                  if(timeClient.forceUpdate() == true)
-                  {
-                      Serial.println("  <NTP update>");
-                      ticks = updateTime - 1;
-                      reachability = reachability | 0x01;
-                      if(ntpUpdates == 20)
-                      {
-                          digitalWrite(syncLedPin, HIGH);
-                          updateTime = SYNC_UPDATE;
-                          tickTime = SYNC_TICKTIME;
-                      }
+        case STATE_TIMING:
+            // Periodically, force an NTP update
+            // use forceUpdate() to keep track of whether NTP is still working
+            // allows sync LED to be lit and "reachability" to be updated
+            if(ticks == 0)
+            {              
+                if(WiFi.status() == WL_CONNECTED)
+                { 
+                    reachability = reachability << 1;
+                    if(timeClient.forceUpdate() == true)
+                    {
+                        Serial.println("  <NTP update>");
+                        ticks = updateTime - 1;
+                        reachability = reachability | 0x01;
+                        if(ntpUpdates == 20)
+                        {
+                            digitalWrite(syncLedPin, HIGH);
+                            updateTime = SYNC_UPDATE;
+                            tickTime = SYNC_TICKTIME;
+                        }
                       
-                      ntpUpdates++;
-                  }
-                  else
-                  {
-                      Serial.println("  <NTP timeout>");
-                      clockState = STATE_STOPPED;
-                  }
-              }
-              else
-              {
-                  Serial.println("  <Wifi disconnected>");
-                  clockState = STATE_STOPPED;
-              }
-          }
-          else
-          {
-              ticks--;
-          }
+                        ntpUpdates++;
+                    }
+                    else
+                    {
+                        Serial.println("  <NTP timeout>");
+                        clockState = STATE_STOPPED;
+                    }
+                }
+                else
+                {
+                    Serial.println("  <Wifi disconnected>");
+                    clockState = STATE_STOPPED;
+                }
+            }
+            else
+            {
+                ticks--;
+            }
 
-          // seconds since start of time
-          epoch = timeClient.getEpochTime();
+            // get time from NTP library
+            // seconds since start of time
+            epoch = timeClient.getEpochTime();
+ 
+            // convert to uk time with bst or gmt
+            epoch = ukTime.toLocal(epoch, &tcr);
+            dayOfMonth = splitTime(epoch, &timeNow);
+            
+            // Reset reSyncCount when day changes
+            if(dayOfMonth != timeNow.tm_mday)
+            {
+                reSyncCount = 0;
+            }
 
-          // convert to uk time with bst or gmt
-          epoch = ukTime.toLocal(epoch, &tcr);
-          dayOfMonth = splitTime(epoch, &timeNow);
-          if(dayOfMonth != timeNow.tm_mday)
-          {
-              reSyncCount = 0;
-          }
+            // send everything to serial port
+            serialShowTime(&timeNow, tcr -> abbrev);
+ 
+            // load display data
+            // with date or time depending on if the date/time button is pressed or not
+            if(digitalRead(dateTimePin) == HIGH)
+            {
+                ledShowTime(&timeNow);
+            }
+            else
+            {
+                Serial.println("Show date");
+                ledShowDate(&timeNow);
+            }
 
-          // send everything to serial port too
-          serialShowTime(&timeNow, tcr -> abbrev);
+            // If enabled, chime hour in morse code, once, on the hour
+            if(digitalRead(disChimePin) == HIGH)
+            {
+                if(timeNow.tm_min == 0)
+                {
+                    if(chime == true)
+                    {
+                        chimeMorse();
+                        chime = false;
+                    }
+                }
+                else
+                {
+                    chime = true;
+                }
+            }   
 
-          // load display data
-          if(digitalRead(dateTimePin) == HIGH)
-          {
-              ledShowTime(&timeNow);
-          }
-          else
-          {
-              Serial.println("Show date");
-              ledShowDate(&timeNow);
-          }
+            // If button pressed, send the time in morse code
+            if(digitalRead(morseTimePin) == LOW)
+            {
+                timeInMorse();
+            }
 
-          // Chime on the hour
-          if(digitalRead(disChimePin) == HIGH)
-          {
-              if(timeNow.tm_min == 0)
-              {
-                  if(chime == true)
-                  {
-                      chimeMorse();
-                      chime = false;
-                  }
-              }
-              else
-              {
-                  chime = true;
-              }
-          }   
+#ifdef __WITH_TELNET
+            wc = ws.available();
+            if(wc.connected())
+            {
+                telnetShowStatus(wc);
+                wc.flush();
+                wc.stop();
+            }
+#endif
 
-          if(digitalRead(morseTimePin) == LOW)
-          {
-              timeInMorse();
-          }
+#ifdef __WITH_HTTP
 
-          break;
+            // web page for normal operation
+            httpClient = httpServer.available();
+            if(httpClient.connected())
+            {
+                httpStatusGetRequest();
+                httpClient.flush();
+                httpClient.stop();
+            }
 
-      case STATE_STOPPED:
-          Serial.println("*** Stopped");
-          timeClient.end();
-          WiFi.end();
-          digitalWrite(LED_BUILTIN, LOW);
-          digitalWrite(syncLedPin, LOW);
-          clockState = STATE_INIT;
-          break;
+#endif
 
-     default:
-          clockState = STATE_STOPPED;
-  }
+            break;
 
-  if(Serial.available() > 0)
-  {
-      cli();
-      clockState = STATE_STOPPED;
-  }
-  else
-  {
-      delay(tickTime);
-  }  
+        case STATE_STOPPED:
+            Serial.println("*** Stopped");
+            timeClient.end();
+            WiFi.end();
+            digitalWrite(LED_BUILTIN, LOW);
+            digitalWrite(syncLedPin, LOW);
+            clockState = STATE_INIT;
+            break;
+
+       default:
+            clockState = STATE_STOPPED;
+    }
+
+    // If someone's plugged the serial cable in and pressed a key
+    // Stop everything and enter CLI
+    if(Serial.available() > 0)
+    {
+        cli();
+        clockState = STATE_STOPPED;
+    }
+    else
+    {
+        delay(tickTime);
+    }  
 }
