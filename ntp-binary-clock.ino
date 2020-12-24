@@ -44,7 +44,7 @@
 #define MAX_COLS        6         // Number of columns in display      
 #define MAX_ROWS        4         // Number of rows in display
 
-#define MORSE_DELAY     80        // Dot period for morse code chime (T=1200/WPM)
+#define MORSE_DELAY     60        // Dot period for morse code chime (T=1200/WPM)
 
 #ifdef __USE_DEFAULTS
 
@@ -353,6 +353,13 @@ void sendMorseChar(int ch)
     int dashDelay;
     int morseChar;
 
+    if(ch > 9)
+    {
+        Serial.print("Illegal value for sendMorseChar() - ");
+        Serial.println(ch);
+        return;
+    }
+
     morseChar = morse[ch];
     
     dashDelay = 3 * MORSE_DELAY;
@@ -388,6 +395,7 @@ void timeInMorse()
 {
     int c;
 
+Serial.println("Morse time");
     for(c = 0; c < 4; c++)
     {
         // Top bit of hours might be set to show PM
@@ -406,6 +414,7 @@ void timeInMorse()
             delay(3 * MORSE_DELAY);
         }
     }
+Serial.println("OK");
 }
 
 void printWifiStatus()
@@ -1155,11 +1164,13 @@ void httpWebServer()
 {
     char c;
     char *urlPtr;
+    unsigned long int ms;
   
     // Start webserver
     httpServer.begin();
 
     httpDone = false;
+    ms = millis();
     while(httpDone == false)
     {
         httpClient = httpServer.available();
@@ -1170,6 +1181,7 @@ void httpWebServer()
             {
                 if(httpClient.available())
                 {
+                    ms = millis();
                     c = httpClient.read();
                     if(c == '\n')
                     {
@@ -1192,6 +1204,14 @@ void httpWebServer()
                             *urlPtr = c;
                             urlPtr++;
                         }
+                    }
+                }
+                else
+                {
+                    if(ms - millis() > 2000)
+                    {
+                        Serial.println("HTTP idle timeout");
+                        httpClient.stop();
                     }
                 }
             }
@@ -1329,14 +1349,17 @@ void httpStatusGetRequest()
 {
     char c;
     char *urlPtr;
+    unsigned long int ms;
 
     Serial.println("Client connected to webserver");
   
     urlPtr = httpRequest;
+    ms = millis();
     while(httpClient.connected())
     {
         if(httpClient.available())
         {
+            ms = millis();
             c = httpClient.read();
             if(c == '\n')
             {
@@ -1361,6 +1384,14 @@ void httpStatusGetRequest()
                 }
             }
         }
+        else
+        {
+            if(millis() - ms > 2000)
+            {
+                Serial.println("HTTP idle timeout");
+                httpClient.stop();
+            }
+        }
     }
     
     Serial.println("Disconnected");
@@ -1382,7 +1413,8 @@ void setup()
 {
     // Serial port
     Serial.begin(9600);
-    while(!Serial);
+//    while(!Serial);
+    delay(5000);
     Serial.println();
     Serial.println(HELLO_STR);
     Serial.println("");
