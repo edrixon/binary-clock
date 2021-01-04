@@ -261,6 +261,8 @@ httpParamType httpParamHandlers[] =
 // To send, clock out 5 bits, LSB first - if LSB is '1', send a dot, otherwise, send a dash
 int morse[10] = { 0x00, 0x01, 0x03, 0x07, 0x0f, 0x1f, 0x1e, 0x1c, 0x18, 0x10 };
 
+unsigned long int lastMillis;
+
 // Initialise display
 void initDisplay()
 {
@@ -395,7 +397,7 @@ void timeInMorse()
 {
     int c;
 
-Serial.println("Morse time");
+    Serial.print("Morse time");
     for(c = 0; c < 4; c++)
     {
         // Top bit of hours might be set to show PM
@@ -414,7 +416,7 @@ Serial.println("Morse time");
             delay(3 * MORSE_DELAY);
         }
     }
-Serial.println("OK");
+    Serial.println(" - done");
 }
 
 void printWifiStatus()
@@ -1337,7 +1339,7 @@ void httpStatusPage(char *url)
         httpClient.println("Connect to that to access configuration page at http://192.168.1.1");
         httpClient.println("</p>");
         httpClient.println("<p>");
-        httpClient.println("Configuration can also be done using CLI on serial port");
+        httpClient.println("Configuration can also be done using CLI on serial port at 9600 baud");
         httpClient.println("</p>");
 
         httpClient.println("</body>");
@@ -1408,6 +1410,23 @@ void cmdWebConfig()
 }
 
 #endif
+
+boolean tickTimeExpired()
+{
+    if((millis() - lastMillis) >= tickTime)
+    {
+        return true;
+    }
+    else
+    {
+        return false;
+    }
+}
+
+void resetTickTime()
+{
+    lastMillis = millis();
+}
 
 void setup()
 {
@@ -1480,6 +1499,8 @@ void setup()
     
     // State machine
     clockState = STATE_INIT;
+
+    lastMillis = millis();
     
     reSyncCount = 0;
     reachability = 0;
@@ -1519,6 +1540,7 @@ void loop()
 #ifdef __WITH_HTTP
             }
 #endif
+            lastMillis = millis();
             break;
 
         case STATE_CONNECTING:
@@ -1550,7 +1572,11 @@ void loop()
             }
             else
             {
-                Serial.print(".");
+                if(tickTimeExpired() == true)
+                {
+                    Serial.print(". ");
+                    lastMillis = millis();
+                }
             }
             break;
 
@@ -1558,59 +1584,64 @@ void loop()
             // Periodically, force an NTP update
             // use forceUpdate() to keep track of whether NTP is still working
             // allows sync LED to be lit and "reachability" to be updated
-            if(ticks == 0)
-            {              
-                if(WiFi.status() == WL_CONNECTED)
-                { 
-                    reachability = reachability << 1;
-                    if(timeClient.forceUpdate() == true)
-                    {
-                        Serial.println("  <NTP update>");
-                        ticks = updateTime - 1;
-                        reachability = reachability | 0x01;
-                        if(ntpUpdates == 20)
+            if(tickTimeExpired() == true)
+            {
+                if(ticks == 0)
+                {              
+                    if(WiFi.status() == WL_CONNECTED)
+                    { 
+                        reachability = reachability << 1;
+                        if(timeClient.forceUpdate() == true)
                         {
-                            digitalWrite(syncLedPin, HIGH);
-                            updateTime = SYNC_UPDATE;
-                            tickTime = SYNC_TICKTIME;
-                        }
+                            Serial.println("  <NTP update>");
+                            ticks = updateTime - 1;
+                            reachability = reachability | 0x01;
+                            if(ntpUpdates == 20)
+                            {
+                                digitalWrite(syncLedPin, HIGH);
+                                updateTime = SYNC_UPDATE;
+                                tickTime = SYNC_TICKTIME;
+                            }
                       
-                        ntpUpdates++;
+                            ntpUpdates++;
+                        }
+                        else
+                        {
+                            Serial.println("  <NTP timeout>");
+                            clockState = STATE_STOPPED;
+                        }
                     }
                     else
                     {
-                        Serial.println("  <NTP timeout>");
+                        Serial.println("  <Wifi disconnected>");
                         clockState = STATE_STOPPED;
                     }
                 }
                 else
                 {
-                    Serial.println("  <Wifi disconnected>");
-                    clockState = STATE_STOPPED;
+                    ticks--;
                 }
-            }
-            else
-            {
-                ticks--;
-            }
 
-            // get time from NTP library
-            // seconds since start of time
-            epoch = timeClient.getEpochTime();
+                // get time from NTP library
+                // seconds since start of time
+                epoch = timeClient.getEpochTime();
  
-            // convert to uk time with bst or gmt
-            epoch = ukTime.toLocal(epoch, &tcr);
-            dayOfMonth = splitTime(epoch, &timeNow);
+                // convert to uk time with bst or gmt
+                epoch = ukTime.toLocal(epoch, &tcr);
+                dayOfMonth = splitTime(epoch, &timeNow);
             
-            // Reset reSyncCount when day changes
-            if(dayOfMonth != timeNow.tm_mday)
-            {
-                reSyncCount = 0;
-            }
+                // Reset reSyncCount when day changes
+                if(dayOfMonth != timeNow.tm_mday)
+                {
+                    reSyncCount = 0;
+                }
 
-            // send everything to serial port
-            serialShowTime(&timeNow, tcr -> abbrev);
+                // send everything to serial port
+                serialShowTime(&timeNow, tcr -> abbrev);
  
+                lastMillis = millis();
+            }  
+
             // load display data
             // with date or time depending on if the date/time button is pressed or not
             if(digitalRead(dateTimePin) == HIGH)
@@ -1624,22 +1655,19 @@ void loop()
             }
 
             // If enabled, chime hour in morse code, once, on the hour
-            if(digitalRead(disChimePin) == HIGH)
+            if(timeNow.tm_min == 0 && digitalRead(disChimePin) == HIGH)
             {
-                if(timeNow.tm_min == 0)
+                if(chime == true)
                 {
-                    if(chime == true)
-                    {
-                        chimeMorse();
-                        chime = false;
-                    }
+                    chimeMorse();
+                    chime = false;
                 }
-                else
-                {
-                    chime = true;
-                }
-            }   
-
+            }
+            else
+            {
+                chime = true;
+            }
+                
             // If button pressed, send the time in morse code
             if(digitalRead(morseTimePin) == LOW)
             {
@@ -1657,7 +1685,6 @@ void loop()
 #endif
 
 #ifdef __WITH_HTTP
-
             // web page for normal operation
             httpClient = httpServer.available();
             if(httpClient.connected())
@@ -1666,9 +1693,7 @@ void loop()
                 httpClient.flush();
                 httpClient.stop();
             }
-
 #endif
-
             break;
 
         case STATE_STOPPED:
@@ -1685,14 +1710,11 @@ void loop()
     }
 
     // If someone's plugged the serial cable in and pressed a key
-    // Stop everything and enter CLI
+    // Enter CLI
+    // Restart state machine when exiting CLI
     if(Serial.available() > 0)
     {
         cli();
         clockState = STATE_STOPPED;
     }
-    else
-    {
-        delay(tickTime);
-    }  
 }
