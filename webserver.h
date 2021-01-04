@@ -1,0 +1,15 @@
+void httpStartAP();
+void httpHeader();
+void httpFooter();
+void httpConfigPage();
+void httpResetConfiguration();
+void httpSetSsid(char *ssid);
+void httpSetPassword(char *password);
+void httpSetNtpServer(char *ntpServer);
+void httpParseParam(char *paramName, char *paramValue);
+void httpSaveConfiguration();
+void httpNotFound();
+void httpHandleGetRequest(char *url);
+void httpWebServer();
+void httpStatusPage(char *url);
+void httpStatusGetRequest();

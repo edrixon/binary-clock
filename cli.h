@@ -1,0 +1,17 @@
+void binToStr(int bin, char *str);
+void splitDigit(int x, int *digPtr);
+void printWifiStatus();
+void serialShowTime(timeNow_t *timeStruct, char *timeName);
+void serialReadline();
+void cmdSaveConfig();
+void cmdClearConfig();
+void cmdGetConfig();
+void cmdSsid();
+void cmdDisplay();
+void cmdPassword();
+void cmdNtpServer();
+void cmdShowState();
+void cmdWiFiVersion();
+void cmdWebConfig();
+void cmdListCommands();
+void cli();

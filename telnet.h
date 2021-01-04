@@ -1,0 +1,1 @@
+void telnetShowStatus(WiFiClient client);
