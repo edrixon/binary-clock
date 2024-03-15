@@ -1,5 +1,7 @@
+boolean chimesEnabled();
+boolean mode12();
 void binToStr(int bin, char *str);
-void splitDigit(int x, int *digPtr);
+void splitDigit(int x, volatile int *digPtr);
 void printWifiStatus();
 void serialShowTime(timeNow_t *timeStruct, char *timeName);
 void serialReadline();
@@ -11,7 +13,19 @@ void cmdDisplay();
 void cmdPassword();
 void cmdNtpServer();
 void cmdShowState();
+void cmdInitUpdate();
+void cmdSyncUpdate();
+void cmdSyncValid();
+#ifdef __MK1_HW
 void cmdWiFiVersion();
+#else
+void cmdCopy();
+void cmdDelete();
+void cmdDirectory();
+void cmdDump();
+void cmdFormat();
+void cmdRename();
+#endif
 void cmdWebConfig();
 void cmdListCommands();
-void cli();
+void commandInterpretter();

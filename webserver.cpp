@@ -1,13 +1,24 @@
-#include <WiFi101.h>
-
 #include "config.h"
+
+#ifdef __MK1_HW
+#include <WiFi101.h>
+#else
+#include <WiFi.h>
+#endif
+
 #include "types.h"
 
 #include "globals.h"
+#include "cli.h"
 
 #ifdef __WITH_HTTP
 
 #include "webserver.h"
+
+// These can be anything...
+IPAddress ap_ipaddr(192, 168, 1, 1);              // AP IP address and default route to give out
+IPAddress ap_gw(192, 168, 1, 1);                  // Default gateway to give out to clients
+IPAddress ap_netmask(255, 255, 255, 0);            // Netmask to give out to clients
 
 char *httpParams[16];
 char httpRequest[255];
@@ -26,26 +37,43 @@ httpParamType httpParamHandlers[] =
     { "ssid", httpSetSsid },
     { "password", httpSetPassword },
     { "ntpserver", httpSetNtpServer },
+    { "initupdate", httpSetInitUpdate },
+    { "syncupdate", httpSetSyncUpdate },
+    { "syncvalid", httpSetSyncValid },
     { NULL, NULL }
 };
-
-
-
 
 void httpStartAP()
 {
     IPAddress ip;
 
     Serial.println(" - Starting WiFi access point");
-  
+
+#ifdef __MK1_HW  
     // Start Wifi in AP mode
-    if(WiFi.beginAP("NTPClock") != WL_AP_LISTENING)
+    if(WiFi.beginAP(AP_SSID) != WL_AP_LISTENING)
     {
         Serial.println(" - Failed");
     }
+#else
+
+    WiFi.mode(WIFI_AP);
+    WiFi.softAPConfig(ap_ipaddr, ap_gw, ap_netmask);
+    WiFi.softAP(AP_SSID);	
+
+#endif
+
     delay(5000);
 
+#ifdef __MK1_HW
     ip = WiFi.localIP();
+#else
+    ip = WiFi.softAPIP();
+#endif
+
+    Serial.print(" - SSID: ");
+    Serial.println(AP_SSID);
+
     Serial.print(" - IP address: ");
     Serial.println(ip);
 }
@@ -59,7 +87,7 @@ void httpHeader()
     httpClient.println("<html>");
     httpClient.println("<body>");
     
-    httpClient.println("<h2>NTP Clock configuration</h2>");  
+    httpClient.println("<h2>Configuration for NTP clock by Ed Rixon, GD6XHG</h2>");  
 }
 
 void httpFooter()
@@ -86,6 +114,18 @@ void httpConfigPage()
     httpClient.print("<input type=\"text\" id=\"ntpserver\" name=\"ntpserver\" value=\"");
     httpClient.print(clockConfig.ntpServer);
     httpClient.println("\"><br><br>");
+    httpClient.println("<label for=\"syncupdate\">Normal update period:</label><br>");
+    httpClient.print("<input type=\"text\" id=\"syncupdate\" name=\"syncupdate\" value=\"");
+    httpClient.print(clockConfig.syncUpdate);
+    httpClient.println("\"><br><br>");
+    httpClient.println("<label for=\"initupdate\">Initial update period:</label><br>");
+    httpClient.print("<input type=\"text\" id=\"initupdate\" name=\"initupdate\" value=\"");
+    httpClient.print(clockConfig.initUpdate);
+    httpClient.println("\"><br><br>");
+    httpClient.println("<label for=\"syncvalid\">Initial sync's required:</label><br>");
+    httpClient.print("<input type=\"text\" id=\"syncvalid\" name=\"syncvalid\" value=\"");
+    httpClient.print(clockConfig.syncValid);
+    httpClient.println("\"><br><br>");
     httpClient.println("<input type=\"submit\" value=\"Save settings\">");
     httpClient.println("</form>");
 
@@ -106,9 +146,7 @@ void httpResetConfiguration()
     httpFooter();
 
 #ifdef __USE_DEFAULTS
-    strcpy(clockConfig.ssid, DEFAULT_SSID);
-    strcpy(clockConfig.password, DEFAULT_PSWD);
-    strcpy(clockConfig.ntpServer, DEFAULT_NTPS);
+    defaultClockConfig();
 #else
     memset(&clockConfig, 0, sizeof(clockConfig));
 #endif
@@ -127,6 +165,21 @@ void httpSetPassword(char *password)
 void httpSetNtpServer(char *ntpServer)
 {
     strcpy(clockConfig.ntpServer, ntpServer);
+}
+
+void httpSetSyncUpdate(char *syncUpdate)
+{
+    clockConfig.syncUpdate = atoi(syncUpdate);  
+}
+
+void httpSetInitUpdate(char *initUpdate)
+{
+    clockConfig.initUpdate = atoi(initUpdate);  
+}
+
+void httpSetSyncValid(char *syncValid)
+{
+    clockConfig.syncValid = atoi(syncValid);  
 }
 
 void httpParseParam(char *paramName, char *paramValue)
@@ -163,19 +216,27 @@ void httpSaveConfiguration()
     httpHeader();
     httpClient.println("<p>Load configuration:</p><br>");
 
-    for(c = 1; c < 4; c++)
+    c = 1;
+    do
     {
         paramName = strtok(httpParams[c], "=");
-        paramValue = strtok(NULL, "=");
-
-        httpClient.print("<p>Set ");
-        httpClient.print(paramName);
-        httpClient.print(" to ");
-        httpClient.print(paramValue);
-        httpClient.print("</p><br>");
+        if(paramName != NULL)
+        {
+            paramValue = strtok(NULL, "=");
+            if(paramValue != NULL)
+            {
+                httpClient.print("<p>Set ");
+                httpClient.print(paramName);
+                httpClient.print(" to ");
+                httpClient.print(paramValue);
+                httpClient.print("</p><br>");
         
-        httpParseParam(paramName, paramValue);
+                httpParseParam(paramName, paramValue);
+                c++;
+            }
+        }
     }
+    while(paramName != NULL && paramValue != NULL);
     
     httpFooter();
 
@@ -317,7 +378,7 @@ void httpStatusPage(char *url)
 
         httpClient.println("<body>");
     
-        httpClient.println("<h2>NTP Clock Status</h2>");
+        httpClient.println("<h2>NTP Clock by Ed Rixon, GD6XHG</h2>");
           
         httpClient.println("<table>");
         httpClient.println("  <tr>");
@@ -372,7 +433,7 @@ void httpStatusPage(char *url)
         httpClient.println("<table>");
         httpClient.println("  <tr>");
         httpClient.println("    <th>Mode</th>");
-        if(digitalRead(dateTimePin) == LOW)
+        if(mode12() == true)
         {
             httpClient.println("    <td>12 hour</td>");
         }
@@ -383,7 +444,7 @@ void httpStatusPage(char *url)
         httpClient.println("  </tr>");
         httpClient.println("  <tr>");
         httpClient.println("    <th>Hourly chimes</th>");
-        if(digitalRead(disChimePin) == HIGH)
+        if(chimesEnabled())
         {
             httpClient.println("    <td>Enabled</td>");
         }
@@ -398,7 +459,9 @@ void httpStatusPage(char *url)
         httpClient.println("Power up holding 'mode' or 'morse' button to enter configuration mode");
         httpClient.println("</p>");
         httpClient.println("<p>");
-        httpClient.println("Clock will start WiFi access point with SSID 'NTPclock'<br>");
+        httpClient.print("Clock will start WiFi access point with SSID '");
+        httpClient.print(AP_SSID);
+        httpClient.println("'<br>");
         httpClient.println("Connect to that to access configuration page at http://192.168.1.1");
         httpClient.println("</p>");
         httpClient.println("<p>");

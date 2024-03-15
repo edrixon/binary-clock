@@ -1,6 +1,11 @@
-#include <Wifi101.h>
-
 #include "config.h"
+
+#ifdef __MK1_HW
+#include <WiFi101.h>
+#else
+#include <WiFi.h>
+#endif
+
 #include "types.h"
 #include "globals.h"
 #include "telnet.h"
@@ -11,9 +16,19 @@
 void telnetShowStatus(WiFiClient client)
 {
     int c;
-    char buff[32];
+    char buff[80];
 
     client.println(HELLO_STR);
+
+    client.print("Software built for ");
+#ifdef __MK1_HW
+    client.println("MK1 hardware (MKR1000)");
+#else
+    client.println("MK2 hardware (Adafruit ESP32-S3)");
+
+    sprintf(buff, "ESP32 Chip model %s, revision %d, %d cores", ESP.getChipModel(), ESP.getChipRevision(), ESP.getChipCores());
+    client.println(buff);
+#endif
 
     client.print("WiFi SSID: ");
     client.println(clockConfig.ssid);
@@ -40,7 +55,7 @@ void telnetShowStatus(WiFiClient client)
     client.println(buff);
 
     sprintf(buff, "Hourly chimes: ");
-    if(digitalRead(disChimePin) == HIGH)
+    if(chimesEnabled() == true)
     {
         strcat(buff, "Enabled");
     }
@@ -51,7 +66,7 @@ void telnetShowStatus(WiFiClient client)
     client.println(buff);
 
     sprintf(buff, "Display mode: ");
-    if(digitalRead(modeSelectPin) == LOW)
+    if(mode12() == true)
     {
         strcat(buff, "12 hour");
     }

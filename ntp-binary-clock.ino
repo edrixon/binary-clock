@@ -1,26 +1,31 @@
 //
-//                 A0, A1, A2, A3, A4, A5    --  Display column select lines (hh mm ss)
-//                 A6,  0,  1,  2            --  Display LED select lines (lsb first)
-//                  3                        --  Sync LED (low = initialising, high = NTP is stable)
-//                  4                        --  Mode select input (low = 12 hour mode, high = 24 hour mode)
-//                  5                        --  Show date or time input (low = date, high = time)
-//                  6                        --  WiFi connected (built-in led lit if connected)
-//                  7                        --  Beeper for hourly chimes in morse code
-//                  8                        --  Hourly chimes input (low = no chimes, high = hourly morse code chime)
-//                  9                        --  Time-in-morse input (low = send time in morse code)
+//  Binary clock for either MKR1000 or Adafruit ESP32-S3 Feather boards
+//    uses multiplexed LED display directly connected to GPIO lines
+//    Time (12h/24h mode) or date can be displayed using BCD
+//    keeps time using Network Time Protocol (NTP) over WiFi
+//    WiFi configuration by built-in wireless access point and web interface or serial port
+//    Can send time in morse code and have an hourly morse chime
+//    Some things can be set at compile time in config.h
+//    User configuration done by putting clock into configuration mode which starts an access point and a webserver
+//    Connect to that on http://192.168.1.1 to complete setup
 //
 
+#include "config.h"
+
 #include <NTPClient.h>
+#ifdef __MK1_HW
 #include <WiFi101.h>
+#include <FlashStorage.h>
+#else
+#include <WiFi.h>
+#include <FFat.h>
+#endif
 #include <WiFiUdp.h>
 #include <TimeLib.h>
 #include <Timezone.h>
-#include <FlashStorage.h>
-
 
 #define __IN_MAIN
 
-#include "config.h"
 #include "types.h"
 #include "telnet.h"
 #include "webserver.h"
@@ -28,13 +33,19 @@
 #include "globals.h"
 #include "morse.h"
 
+#ifdef __MK1_HW
 #include "Timer5.h"
+#else
+hw_timer_t *timer0 = NULL;
+#endif
 
 #ifdef __WITH_TELNET
 WiFiServer ws(23);
 #endif
 
+#ifdef __MK1_HW
 FlashStorage(savedConfig, eepromData);
+#endif
 
 // State machine
 clockStateType clockState;
@@ -48,7 +59,7 @@ TimeChangeRule ukBST = { "BST", Last, Sun, Mar, 2, 60 };
 TimeChangeRule ukGMT = { "GMT", Last, Sun, Oct, 2, 0 };
 Timezone ukTime(ukGMT, ukBST);
 
-int ntpUpdates;        // need 20 re-sync's before time is "stable"
+int ntpUpdates;
 
 int tickTime;
 
@@ -58,29 +69,36 @@ boolean chime;
 
 unsigned long int lastMillis;
 
-// Initialise display
-void initDisplay()
+void defaultClockConfig()
 {
-    int c;
+    strcpy(clockConfig.ssid, DEFAULT_SSID);
+    strcpy(clockConfig.password, DEFAULT_PSWD);
+    strcpy(clockConfig.ntpServer, DEFAULT_NTPS);
+    clockConfig.initUpdate = INIT_UPDATE;
+    clockConfig.syncUpdate = SYNC_UPDATE;
+    clockConfig.syncValid = SYNC_VALID;  
+}
 
-    for(c = 0; c < MAX_ROWS; c++)
-    {
-        pinMode(ledDisplay.rowDataPins[c], OUTPUT);
-        digitalWrite(ledDisplay.rowDataPins[c], LOW);
-    }
+boolean initClockConfig()
+{
+#ifdef __USE_DEFAULTS
 
-    for(c = 0; c < MAX_COLS; c++)
-    {
-        ledDisplay.data[c] = 0;
-        pinMode(ledDisplay.colSelectPins[c], OUTPUT);
-        digitalWrite(ledDisplay.colSelectPins[c], LOW);
-    }
+        Serial.println("No configuration found - loading defaults");
+        defaultClockConfig();
+        return true;
+#else
+        memset(&clockConfig, 0, sizeof(clockConfig));
 
-    ledDisplay.colSelect = 0;
+        return false;
+#endif
 }
 
 // Interrupt handler for display timer
+#ifdef __MK1_HW
 void displayInterrupt()
+#else
+void IRAM_ATTR displayInterrupt()
+#endif
 {
     int c;
     int tmpDisplay;
@@ -114,6 +132,152 @@ void displayInterrupt()
     digitalWrite(ledDisplay.colSelectPins[ledDisplay.colSelect], HIGH);
 }
 
+#ifdef __MK1_HW
+
+void syncLed(int state)
+{
+    digitalWrite(PIN_SYNCLED, state);
+    ntpSyncState = state;
+}
+
+void initDisplayTimer()
+{
+    interruptCount = 0;
+    MyTimer5.begin(DISP_INTS_PER_SECOND);
+    MyTimer5.attachInterrupt(displayInterrupt);
+    MyTimer5.start();
+}
+
+boolean getClockConfig()
+{
+    clockConfig = savedConfig.read();
+    if(clockConfig.eepromValid == EEPROM_VALID)
+    {
+        return true;
+    }
+    else
+    {
+        return initClockConfig(); 
+    }
+}
+
+void saveClockConfig()
+{
+    clockConfig.eepromValid = EEPROM_VALID;
+    savedConfig.write(clockConfig);
+}
+
+#else
+
+void syncLed(int state)
+{
+    ntpSyncState = state;
+}
+
+void initDisplayTimer()
+{
+    interruptCount = 0;
+    
+    timer0 = timerBegin(0, 80, true);
+    timerAttachInterrupt(timer0, &displayInterrupt, true);
+    timerAlarmWrite(timer0, DISP_INT_100US * 100, true);
+    timerAlarmEnable(timer0);
+}
+
+boolean getClockConfig()
+{
+    File fp;
+    
+    clockConfig.eepromValid = ~EEPROM_VALID;
+
+    // Read the config file
+    fp = FFat.open(CONFIG_FILENAME, FILE_READ);
+    if(!fp)
+    {
+        Serial.println("Error opening configuration file for reading");
+    }
+    else
+    {
+        fp.read((unsigned char *)&clockConfig, sizeof(clockConfig));
+        fp.close();
+    }
+  
+    if(clockConfig.eepromValid == EEPROM_VALID)
+    {
+        return true;
+    }
+    else
+    {
+        return initClockConfig(); 
+    }
+}
+
+void saveClockConfig()
+{
+    File fp;
+
+    fp = FFat.open(CONFIG_FILENAME, FILE_WRITE);
+    if(!fp)
+    {
+        Serial.println("Error opening configuration file for writing");
+        return;
+    }
+
+    clockConfig.eepromValid = EEPROM_VALID;
+
+    // Write the config file
+    fp.write((unsigned char *)&clockConfig, sizeof(clockConfig));
+    fp.close();
+}
+
+// Do something obvious to prove board has reset properly
+// Take long enough to swap com: ports for serial monitor
+// in case board has just been programmed using boot0 button
+void initDelay()
+{
+    // Blue
+    neopixelWrite(PIN_NEOPIXEL, RGB_OFF, RGB_OFF, RGB_VAL);
+    delay(1000);
+
+    // Green
+    neopixelWrite(PIN_NEOPIXEL, RGB_OFF, RGB_VAL, RGB_OFF);
+    delay(1000);
+
+    // Red
+    neopixelWrite(PIN_NEOPIXEL, RGB_VAL, RGB_OFF, RGB_OFF);
+    delay(1000);
+
+    // Off
+    neopixelWrite(PIN_NEOPIXEL, RGB_OFF, RGB_OFF, RGB_OFF);
+    delay(1000);
+
+    // Red
+    neopixelWrite(PIN_NEOPIXEL, RGB_VAL, RGB_OFF, RGB_OFF);
+}
+
+#endif
+
+// Initialise display
+void initDisplay()
+{
+    int c;
+
+    for(c = 0; c < MAX_ROWS; c++)
+    {
+        pinMode(ledDisplay.rowDataPins[c], OUTPUT);
+        digitalWrite(ledDisplay.rowDataPins[c], LOW);
+    }
+
+    for(c = 0; c < MAX_COLS; c++)
+    {
+        ledDisplay.data[c] = 0;
+        pinMode(ledDisplay.colSelectPins[c], OUTPUT);
+        digitalWrite(ledDisplay.colSelectPins[c], LOW);
+    }
+
+    ledDisplay.colSelect = 0;
+}
+
 int splitTime(time_t epoch, timeNow_t *timeStruct)
 {
     int rtn;
@@ -132,22 +296,49 @@ int splitTime(time_t epoch, timeNow_t *timeStruct)
 
 void ledShowTime(timeNow_t *timeStruct)
 {
-    if(digitalRead(modeSelectPin) == LOW && timeStruct -> tm_hour >= 12)
-    {
-        timeStruct -> tm_hour = timeStruct -> tm_hour - 12;
+#ifdef __MK2_HW
 
-        splitDigit(timeStruct -> tm_hour, &ledDisplay.data[0]);
-        
-        // most significant hour bit is used to drive AM/PM indicator
-        ledDisplay.data[0] = ledDisplay.data[0] | 0x08;
+    int c;
+
+    if(digitalRead(PIN_BOOT) == LOW)
+    {
+        for(c = 0; c < MAX_COLS; c++)
+        {
+            ledDisplay.data[c] = 0x0f;
+        }
     }
     else
     {
-        splitDigit(timeStruct -> tm_hour, &ledDisplay.data[0]);
-    }
 
-    splitDigit(timeStruct -> tm_min, &ledDisplay.data[2]);
-    splitDigit(timeStruct -> tm_sec, &ledDisplay.data[4]);     
+#endif
+
+        if(digitalRead(PIN_MODESEL) == LOW && timeStruct -> tm_hour >= 12)
+        {
+            timeStruct -> tm_hour = timeStruct -> tm_hour - 12;
+
+            splitDigit(timeStruct -> tm_hour, &ledDisplay.data[0]);
+        
+            // most significant hour bit is used to drive AM/PM indicator
+            ledDisplay.data[0] = ledDisplay.data[0] | BIT_AMPM;
+        }
+        else
+        {
+            splitDigit(timeStruct -> tm_hour, &ledDisplay.data[0]);
+        }
+
+#ifdef __MK2_HW
+        if(ntpSyncState == HIGH)
+        { 
+            ledDisplay.data[0] = ledDisplay.data[0] | BIT_SYNCLED; 
+        }
+#endif
+
+        splitDigit(timeStruct -> tm_min, &ledDisplay.data[2]);
+        splitDigit(timeStruct -> tm_sec, &ledDisplay.data[4]);     
+
+#ifdef __MK2_HW
+    }
+#endif
 }
 
 void ledShowDate(timeNow_t *timeStruct)
@@ -158,42 +349,13 @@ void ledShowDate(timeNow_t *timeStruct)
     splitDigit(timeStruct -> tm_mon, &ledDisplay.data[4]);
 }
 
-boolean getClockConfig()
-{
-    clockConfig = savedConfig.read();
-    if(clockConfig.eepromValid == EEPROM_VALID)
-    {
-        return true;
-    }
-    else
-    {
-#ifdef __USE_DEFAULTS
-        Serial.println("No configuration found - loading defaults");
-        strcpy(clockConfig.ssid, DEFAULT_SSID);
-        strcpy(clockConfig.password, DEFAULT_PSWD);
-        strcpy(clockConfig.ntpServer, DEFAULT_NTPS);
-
-        return true;
-#else
-        memset(&clockConfig, 0, sizeof(clockConfig));
-
-        return false;
-#endif        
-    }
-}
-
-void saveClockConfig()
-{
-    clockConfig.eepromValid = EEPROM_VALID;
-    savedConfig.write(clockConfig);
-}
-
 #ifdef __TEST_DISPLAY
 
 void testDisplay()
 {
       int c;
       int d;
+
 
       for(c = 0; c < MAX_COLS; c++)
       {
@@ -217,11 +379,12 @@ void testDisplay()
           delay(500);
       }
 
+#ifdef __MK1_HW
       digitalWrite(syncLedPin, HIGH);
       delay(500);
       digitalWrite(syncLedPin, LOW);
       delay(500);
-
+#endif
 }
 
 #endif
@@ -250,13 +413,15 @@ void initDisplayPattern()
         c--;      
     }
 
+#ifdef __MK1_HW
     for(c = 0; c < 3; c++)
     {
-        digitalWrite(syncLedPin, HIGH);
+        digitalWrite(PIN_SYNCLED, HIGH);
         delay(100);
-        digitalWrite(syncLedPin, LOW);
+        digitalWrite(PIN_SYNCLED, LOW);
         delay(100);
     }
+#endif
 }
 
 boolean tickTimeExpired()
@@ -280,41 +445,78 @@ void setup()
 {
     // Serial port
     Serial.begin(9600);
-//    while(!Serial);
+
+#ifdef __MK2_HW
+    // Disable I2C pullup resistors on ESP32 board
+    pinMode(PIN_I2C_POWER, INPUT);
+
+    Serial.println("12345678901234567890");
+    initDelay();
+#else
     delay(5000);
+#endif
+  
     Serial.println();
     Serial.println(HELLO_STR);
     Serial.println("");
+    Serial.print("Software built for ");
+#ifdef __MK1_HW
+    Serial.println("MK1 hardware (MKR1000)");
+#else
+    Serial.println("MK2 hardware (Adafruit ESP32-S3)");
+    Serial.printf("ESP32 Chip model %s, revision %d, %d cores\r\n", ESP.getChipModel(), ESP.getChipRevision(), ESP.getChipCores());
+    
+    if(!FFat.begin(true))
+    {
+        Serial.println(" - Error mounting FAT filesystem");
+    }
+    else
+    {
+        Serial.printf(" - Mounted FAT filesystem (%ld bytes free)\r\n", FFat.freeBytes());
+    }
+#endif
+
+    Serial.println(" - GPIO");
 
     // GPIO
+#ifdef __MK1_HW
     pinMode(LED_BUILTIN, OUTPUT);
-    pinMode(syncLedPin, OUTPUT);
-    pinMode(chimePin, OUTPUT);
-    pinMode(disChimePin, INPUT_PULLUP);
-    pinMode(modeSelectPin, INPUT_PULLUP);
-    pinMode(dateTimePin, INPUT_PULLUP);
-    pinMode(morseTimePin, INPUT_PULLUP);
+    pinMode(PIN_SYNCLED, OUTPUT);
+#else
 
-    digitalWrite(syncLedPin, LOW);
-    digitalWrite(chimePin, LOW);
+    // The "boot" button on the ESP32 board
+    pinMode(PIN_BOOT, INPUT_PULLUP);
+    
+#endif
+    pinMode(PIN_BEEP, OUTPUT);
+    pinMode(PIN_CHIME, INPUT_PULLUP);
+    pinMode(PIN_MODESEL, INPUT_PULLUP);
+    pinMode(PIN_DATETIME, INPUT_PULLUP);
+    pinMode(PIN_MORSETIME, INPUT_PULLUP);
+
+    syncLed(LOW);
+    digitalWrite(PIN_BEEP, LOW);
+#ifdef __MK1_HW
     digitalWrite(LED_BUILTIN, LOW);
+#endif
 
+    Serial.println(" - initDisplay()");
     // LED display
     initDisplay();
 
+    Serial.println(" - initDisplayTimer()");
     // Display interrupt and handler
-    interruptCount = 0;
-    MyTimer5.begin(DISP_INTS_PER_SECOND);
-    MyTimer5.attachInterrupt(displayInterrupt);
-    MyTimer5.start();
+    initDisplayTimer();
 
+    Serial.println(" - initDisplayPattern()");
     // Display a pattern
     initDisplayPattern();
 
+    Serial.println(" - One beep");
     // One beep
-    digitalWrite(chimePin, HIGH);
+    digitalWrite(PIN_BEEP, HIGH);
     delay(MORSE_DELAY);
-    digitalWrite(chimePin, LOW);
+    digitalWrite(PIN_BEEP, LOW);
 
 #ifdef __TEST_DISPLAY
 
@@ -325,8 +527,10 @@ void setup()
 
 #endif
 
+    Serial.println(" - getClockConfig()");
     // Read configuration from flash memory
     // Will use defaults if nothing found and compiled with __USE_DEFAULTS set
+    // if __USE_DEFAULTS is not defined, will start the command interpretter instead
     while(getClockConfig() == false)
     {
         // If there's no configuration, display a "X" and start command line
@@ -338,7 +542,7 @@ void setup()
               
         Serial.println("No configuration found in FLASH!!");
 
-        cli();
+        commandInterpretter();
 
         ledDisplay.data[2] = 0;
         ledDisplay.data[3] = 0;
@@ -348,15 +552,22 @@ void setup()
     // State machine
     clockState = STATE_INIT;
 
+    tickTime = TICKTIME;
     lastMillis = millis();
     
     reSyncCount = 0;
     reachability = 0;
     chime = true;
+
+    Serial.println("");
+    Serial.println("******* Showtime !!!");
+    Serial.println("");
+
 }
 
 void loop()
 {
+    int ledState;
     time_t epoch;
     TimeChangeRule *tcr;
 #ifdef __WITH_TELNET
@@ -366,29 +577,41 @@ void loop()
     switch(clockState)
     {
         case STATE_INIT:
-            Serial.println("*** Starting  ***");
+            Serial.println("***  Starting  ***");
 #ifdef __WITH_HTTP
-            if(digitalRead(morseTimePin) == LOW || digitalRead(dateTimePin) == LOW)
+            if(digitalRead(PIN_MORSETIME) == LOW || digitalRead(PIN_DATETIME) == LOW)
             {
+#ifdef __MK2_HW
+                neopixelWrite(PIN_NEOPIXEL, RGB_VAL, RGB_OFF, RGB_VAL);
+#endif
                 Serial.println(" - Web configuration mode");
                 httpStartAP();
                 httpWebServer();
+#ifdef __MK1_HW
                 WiFi.end();
+#endif
             }
             else
             {
-                Serial.println(" - Normal operation");
+                Serial.println(" - Timing mode");
 #endif
+
                 WiFi.begin(clockConfig.ssid, clockConfig.password);
-                digitalWrite(LED_BUILTIN, LOW);
-                digitalWrite(syncLedPin, LOW);
+#ifdef __MK1_HW
+                ledState = LOW;
+                digitalWrite(LED_BUILTIN, ledState);
+#else
+                WiFi.mode(WIFI_STA);
+                ledState = RGB_VAL;
+                neopixelWrite(PIN_NEOPIXEL, RGB_OFF, RGB_OFF, ledState);
+#endif
+                syncLed(LOW);
                 clockState = STATE_CONNECTING;
-                tickTime = INIT_TICKTIME;
                 reSyncCount++;
 #ifdef __WITH_HTTP
             }
 #endif
-            lastMillis = millis();
+            resetTickTime();
             break;
 
         case STATE_CONNECTING:
@@ -396,19 +619,23 @@ void loop()
             {
                 Serial.println(" - Wifi connected");
                 printWifiStatus();
+#ifdef __MK1_HW
                 digitalWrite(LED_BUILTIN, HIGH);
+#else
+                neopixelWrite(PIN_NEOPIXEL, RGB_OFF, RGB_VAL, RGB_OFF);
+#endif
                 Serial.print(" - Starting NTP - ");
                 Serial.println(clockConfig.ntpServer);
                 timeClient.setPoolServerName(clockConfig.ntpServer);
-                timeClient.setUpdateInterval(SYNC_UPDATE * 1000);
+                timeClient.setUpdateInterval(clockConfig.syncUpdate * 1000);
                 timeClient.begin(NTP_PORT);
                 clockState = STATE_TIMING;
-                updateTime = INIT_UPDATE;
+                updateTime = clockConfig.initUpdate;
                 ntpUpdates = 0;
                 ticks = 0;
 #ifdef __WITH_TELNET
                 ws.begin();
-                Serial.println(" - Telnet started");
+                Serial.println(" - Telnet server started");
 #endif
 #ifdef __WITH_HTTP
                 httpServer.begin();
@@ -422,14 +649,37 @@ void loop()
             {
                 if(tickTimeExpired() == true)
                 {
+#ifdef __MK1_HW
+                    if(ledState == HIGH)
+                    {
+                        ledState = LOW;
+                    }
+                    else
+                    
+                    {
+                        ledState = HIGH;
+                    }
+                    digitalWrite(LED_BUILTIN, ledState);
+#else                    
+                    if(ledState == RGB_OFF)
+                    {
+                        ledState = RGB_VAL;
+                    }
+                    else
+                    {
+                        ledState = RGB_OFF;
+                    }
+                    neopixelWrite(PIN_NEOPIXEL, RGB_OFF, RGB_OFF, ledState);               
+#endif
+                    
                     Serial.print(". ");
-                    lastMillis = millis();
+                    resetTickTime();
                 }
             }
             break;
 
         case STATE_TIMING:
-            // Periodically, force an NTP update
+            // Periodically force an NTP update
             // use forceUpdate() to keep track of whether NTP is still working
             // allows sync LED to be lit and "reachability" to be updated
             if(tickTimeExpired() == true)
@@ -444,14 +694,14 @@ void loop()
                             Serial.println("  <NTP update>");
                             ticks = updateTime - 1;
                             reachability = reachability | 0x01;
-                            if(ntpUpdates == 20)
+                            ntpUpdates++;
+
+                            if(ntpUpdates == clockConfig.syncValid)
                             {
-                                digitalWrite(syncLedPin, HIGH);
-                                updateTime = SYNC_UPDATE;
-                                tickTime = SYNC_TICKTIME;
+                                syncLed(HIGH);
+                                updateTime = clockConfig.syncUpdate;
                             }
                       
-                            ntpUpdates++;
                         }
                         else
                         {
@@ -490,23 +740,39 @@ void loop()
                 lastMillis = millis();
             }  
 
-            // load display data
-            // with date or time depending on if the date/time button is pressed or not
-            if(digitalRead(dateTimePin) == HIGH)
+            // If button pressed, send the time in morse code
+            if(digitalRead(PIN_MORSETIME) == LOW)
             {
-                ledShowTime(&timeNow);
+                if(digitalRead(PIN_DATETIME) == LOW)
+                {
+                    Serial.println("  <IP address in morse>");
+                    ipAddressInMorse();
+                }
+                else
+                {
+                    Serial.println("  <Time in morse>");
+                    timeInMorse();
+                }
             }
             else
             {
-                Serial.println("Show date");
-                ledShowDate(&timeNow);
+                if(digitalRead(PIN_DATETIME) == LOW)
+                {
+                    Serial.println("  <Show date>");
+                    ledShowDate(&timeNow);                
+                }
+                else
+                {
+                    ledShowTime(&timeNow);
+                }
             }
 
             // If enabled, chime hour in morse code, once, on the hour
-            if(timeNow.tm_min == 0 && digitalRead(disChimePin) == HIGH)
+            if(timeNow.tm_min == 0 && chimesEnabled() == true)
             {
                 if(chime == true)
                 {
+                    Serial.println("  <Hourly chime>");
                     chimeMorse();
                     chime = false;
                 }
@@ -516,13 +782,8 @@ void loop()
                 chime = true;
             }
                 
-            // If button pressed, send the time in morse code
-            if(digitalRead(morseTimePin) == LOW)
-            {
-                timeInMorse();
-            }
-
 #ifdef __WITH_TELNET
+            // If someone's connected with telnet, deal with it
             wc = ws.available();
             if(wc.connected())
             {
@@ -533,7 +794,7 @@ void loop()
 #endif
 
 #ifdef __WITH_HTTP
-            // web page for normal operation
+            // If someone's connected to webserver, deal with it
             httpClient = httpServer.available();
             if(httpClient.connected())
             {
@@ -547,9 +808,13 @@ void loop()
         case STATE_STOPPED:
             Serial.println("*** Stopped");
             timeClient.end();
+#ifdef __MK1_HW
             WiFi.end();
             digitalWrite(LED_BUILTIN, LOW);
-            digitalWrite(syncLedPin, LOW);
+#else
+            WiFi.disconnect();
+#endif
+            syncLed(LOW);
             clockState = STATE_INIT;
             break;
 
@@ -562,7 +827,7 @@ void loop()
     // Restart state machine when exiting CLI
     if(Serial.available() > 0)
     {
-        cli();
+        commandInterpretter();
         clockState = STATE_STOPPED;
     }
 }

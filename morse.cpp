@@ -1,8 +1,20 @@
 
+#ifdef __MK1_HW
+#include <WiFi101.h>
+#else
+#include <WiFi.h>
+#endif
+
 #include "config.h"
 #include "types.h"
 #include "globals.h"
 #include "morse.h"
+
+// Timing is this:-
+//   MORSE_DELAY is one dot period
+//   Time between dots/dashes of same character is MORSE_DELAY
+//   Time between characters in same number is 5 * MORSE_DELAY
+//   Time between numbers is 15 * MORSE_DELAY (a bit longer than it should be...)
 
 // Morse characters 0-9
 // To send, clock out 5 bits, LSB first - if LSB is '1', send a dot, otherwise, send a dash
@@ -27,7 +39,7 @@ void sendMorseChar(int ch)
 
     for(c = 0; c < 5; c++)
     {
-        digitalWrite(chimePin, HIGH);
+        digitalWrite(PIN_BEEP, HIGH);
         if((morseChar & 0x01) == 0x01)
         {
             delay(MORSE_DELAY);
@@ -36,19 +48,18 @@ void sendMorseChar(int ch)
         {
             delay(dashDelay);
         }
-        digitalWrite(chimePin, LOW);
+        digitalWrite(PIN_BEEP, LOW);
 
         delay(MORSE_DELAY);  // inter-symbol delay
 
         morseChar = morseChar >> 1;
-    }
-    
-    delay(2 * MORSE_DELAY);
+    }    
 }
 
 void chimeMorse()
 {
     sendMorseChar(ledDisplay.data[0] & 0x03);
+    delay(3 * MORSE_DELAY);
     sendMorseChar(ledDisplay.data[1]);
 }
 
@@ -68,12 +79,55 @@ void timeInMorse()
         {
             sendMorseChar(ledDisplay.data[c]);
         }
+        delay(5 * MORSE_DELAY);
 
         // Wait "word space" between hours and minutes
         if(c == 1)
         {
-            delay(3 * MORSE_DELAY);
+            delay(10 * MORSE_DELAY);
         }
     }
     Serial.println(" - done");
+}
+
+void numberInMorse(int n)
+{
+    int divisor;
+    int ch;
+
+    divisor = 100;
+    while(divisor)
+    {
+        ch = n / divisor;
+
+        if(divisor == 100)
+        {
+            if(ch != 0)
+            {
+                sendMorseChar(ch);
+                delay(5* MORSE_DELAY);
+            }
+        }
+        else
+        {
+            sendMorseChar(ch);
+            delay(5 * MORSE_DELAY);
+        }
+        
+        n = n % divisor;
+        divisor = divisor / 10;
+    }
+}
+
+void ipAddressInMorse()
+{
+    IPAddress ip;
+    int c;
+
+    ip = WiFi.localIP();
+    for(c = 0; c < 4; c++)
+    {
+        numberInMorse(ip[c]);
+        delay(10 * MORSE_DELAY);
+    }
 }
