@@ -54,13 +54,3 @@ typedef enum clockState_e
     STATE_TIMING,
     STATE_STOPPED
 } clockStateType;
-
-// LED display
-typedef struct
-{
-    int colSelectPins[MAX_COLS];
-    int colDataSize[MAX_COLS];
-    int rowDataPins[MAX_ROWS];
-    int data[MAX_COLS];
-    int colSelect;
-} ledDisplay_t;

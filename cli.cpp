@@ -274,10 +274,11 @@ void cmdSsid()
 void cmdDisplay()
 {
     int c;
+    char *dPtr;
     
     if(paramPtr[0] == NULL)
     {
-        Serial.println("display <digits>");
+        Serial.println("display <six lowercase hex digits without spaces>");
     }
     else
     {
@@ -287,9 +288,18 @@ void cmdDisplay()
         }
         else
         {
+            dPtr = paramPtr[0];
             for(c = 0; c < 6; c++)
             {
-                ledDisplay.data[c] = (*(paramPtr[0] + c)) - 48;
+                if(isdigit(*dPtr))
+                {
+                    ledColData[c] = *dPtr - 48;
+                }
+                else
+                {
+                    ledColData[c] = *dPtr - 87;
+                }
+                dPtr++;
             }
         }
     }
@@ -691,13 +701,12 @@ void commandInterpretter()
     Serial.println("");
 
     // Something other than the time...
-    ledDisplay.data[0] = 0;
-    ledDisplay.data[1] = 2;
-    ledDisplay.data[2] = 2;
-    ledDisplay.data[3] = 7;
-    ledDisplay.data[4] = 2;
-    ledDisplay.data[5] = 2;
-    
+    ledColData[0] = 0;
+    ledColData[1] = 2;
+    ledColData[2] = 2;
+    ledColData[3] = 7;
+    ledColData[4] = 2;
+    ledColData[5] = 2;
 
     done = false;
     do

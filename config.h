@@ -14,11 +14,20 @@
 
 // NTP configuration
 #define NTP_PORT       123       // local port number
+#define NTP_TIMEOUT    5000      // Timeout for NTP response in ms
 #define SYNC_UPDATE    900       // number of seconds between NTP polls once stable
 #define INIT_UPDATE    20        // initial time between NTP polls 
 #define SYNC_VALID     5         // How many initial NTP responses needed before "stable"
 
 #define TICKTIME       1000      // ms tick time for normal operation of state machine
+
+#ifdef __WITH_TELNET
+#define TELNET_PORT    23        // Port for telnet server to listen on
+#endif
+
+#ifdef __WITH_HTTP
+#define HTTP_PORT      80        // Port for webserver to listen on
+#endif
 
 // Command line interpretter
 #define SERBUFF_LEN    80        // Command line buffer size
@@ -76,7 +85,8 @@
 
 // For MK2 hardware (PCB)
 
-#define DISP_INT_100US  25       // Interrupt period in 100's of usecs - this is multiplied by 100 in the code to give ms period
+#define TIMER0_PRESCALE 80       // Display timer prescaler value - timer clock = 80MHz / TIMER_PRESCALE = 1MHz (1us period)
+#define TIMER0_RELOAD   3000     // Display timer will interrupt after TIMER_PRESCALE * TIMER_RELOAD = 1us * 3000 = 3ms
 #define BIT_SYNCLED     0x04     // Bit for NTP synchronisation LED in "hours" LEDs
 #define CONFIG_FILENAME "/config.dat"  // The filename for configuration information
 #define RGB_OFF         0        // RGB value to use to turn colour off 

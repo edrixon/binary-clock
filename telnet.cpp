@@ -26,7 +26,7 @@ void telnetShowStatus(WiFiClient client)
 #else
     client.println("MK2 hardware (Adafruit ESP32-S3)");
 
-    sprintf(buff, "ESP32 Chip model %s, revision %d, %d cores", ESP.getChipModel(), ESP.getChipRevision(), ESP.getChipCores());
+    sprintf(buff, "ESP32 chip model %s, revision %d, %d cores", ESP.getChipModel(), ESP.getChipRevision(), ESP.getChipCores());
     client.println(buff);
 #endif
 
@@ -39,9 +39,9 @@ void telnetShowStatus(WiFiClient client)
     client.println("Display data:");
     for(c = 0; c < 6; c++)
     {
-        sprintf(buff, "  Digit %d - 0x%02x - ", c, ledDisplay.data[c]);
+        sprintf(buff, "  Digit %d - 0x%02x - ", c, ledColData[c]);
         client.print(buff);
-        binToStr(ledDisplay.data[c], buff);
+        binToStr(ledColData[c], buff);
         client.println(buff);
     }
 

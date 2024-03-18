@@ -20,6 +20,13 @@
 // To send, clock out 5 bits, LSB first - if LSB is '1', send a dot, otherwise, send a dash
 int morse[10] = { 0x00, 0x01, 0x03, 0x07, 0x0f, 0x1f, 0x1e, 0x1c, 0x18, 0x10 };
 
+void morseBeep(int beepLength)
+{
+    digitalWrite(PIN_BEEP, HIGH);
+    delay(beepLength);
+    digitalWrite(PIN_BEEP, LOW);
+}
+
 void sendMorseChar(int ch)
 {
     int c;
@@ -39,16 +46,14 @@ void sendMorseChar(int ch)
 
     for(c = 0; c < 5; c++)
     {
-        digitalWrite(PIN_BEEP, HIGH);
         if((morseChar & 0x01) == 0x01)
         {
-            delay(MORSE_DELAY);
+            morseBeep(MORSE_DELAY);
         }
         else
         {
-            delay(dashDelay);
+            morseBeep(dashDelay);
         }
-        digitalWrite(PIN_BEEP, LOW);
 
         delay(MORSE_DELAY);  // inter-symbol delay
 
@@ -58,26 +63,25 @@ void sendMorseChar(int ch)
 
 void chimeMorse()
 {
-    sendMorseChar(ledDisplay.data[0] & 0x03);
+    sendMorseChar(ledColData[0] & 0x03);
     delay(3 * MORSE_DELAY);
-    sendMorseChar(ledDisplay.data[1]);
+    sendMorseChar(ledColData[1]);
 }
 
 void timeInMorse()
 {
     int c;
 
-    Serial.print("Morse time");
     for(c = 0; c < 4; c++)
     {
         // Top bit of hours might be set to show PM
         if(c == 0)
         {
-            sendMorseChar(ledDisplay.data[c] & 0x03);
+            sendMorseChar(ledColData[c] & 0x03);
         }
         else
         {
-            sendMorseChar(ledDisplay.data[c]);
+            sendMorseChar(ledColData[c]);
         }
         delay(5 * MORSE_DELAY);
 
@@ -87,7 +91,6 @@ void timeInMorse()
             delay(10 * MORSE_DELAY);
         }
     }
-    Serial.println(" - done");
 }
 
 void numberInMorse(int n)

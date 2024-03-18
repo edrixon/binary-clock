@@ -34,17 +34,18 @@
 #include "morse.h"
 
 #ifdef __MK1_HW
+
 #include "Timer5.h"
+FlashStorage(savedConfig, eepromData);
+
 #else
+
 hw_timer_t *timer0 = NULL;
+
 #endif
 
 #ifdef __WITH_TELNET
-WiFiServer ws(23);
-#endif
-
-#ifdef __MK1_HW
-FlashStorage(savedConfig, eepromData);
+WiFiServer telnetServer(TELNET_PORT);
 #endif
 
 // State machine
@@ -63,11 +64,11 @@ int ntpUpdates;
 
 int tickTime;
 
-int dayOfMonth;
-
-boolean chime;
+boolean chimedAlready;
 
 unsigned long int lastMillis;
+
+int ledState;
 
 void defaultClockConfig()
 {
@@ -81,15 +82,21 @@ void defaultClockConfig()
 
 boolean initClockConfig()
 {
+    Serial.print("No valid configuration");
+
 #ifdef __USE_DEFAULTS
 
-        Serial.println("No configuration found - loading defaults");
-        defaultClockConfig();
-        return true;
+    Serial.println(" - loading defaults");
+    defaultClockConfig();
+    return true;
+        
 #else
-        memset(&clockConfig, 0, sizeof(clockConfig));
 
-        return false;
+    Serial.println("");
+    memset(&clockConfig, 0, sizeof(clockConfig));
+
+    return false;
+
 #endif
 }
 
@@ -105,31 +112,31 @@ void IRAM_ATTR displayInterrupt()
 
     interruptCount++;
 
-    digitalWrite(ledDisplay.colSelectPins[ledDisplay.colSelect], LOW);
-    
-    ledDisplay.colSelect++;
-    if(ledDisplay.colSelect == MAX_COLS)
+    digitalWrite(ledColPins[ledColSelect], LOW);
+
+    ledColSelect++;
+    if(ledColSelect == MAX_COLS)
     {
-        ledDisplay.colSelect = 0;
+        ledColSelect = 0;
     }
 
-    tmpDisplay = ledDisplay.data[ledDisplay.colSelect];
+    tmpDisplay = ledColData[ledColSelect];
 
-    for(c = 0; c < ledDisplay.colDataSize[ledDisplay.colSelect]; c++)
+    for(c = 0; c < ledColSize[ledColSelect]; c++)
     {
         if((tmpDisplay & 0x01) != 0)
         {
-            digitalWrite(ledDisplay.rowDataPins[c], HIGH);
+            digitalWrite(ledRowPins[c], HIGH);
         }
         else
         {
-            digitalWrite(ledDisplay.rowDataPins[c], LOW);
+            digitalWrite(ledRowPins[c], LOW);
         }
 
         tmpDisplay = tmpDisplay >> 1;
     }
 
-    digitalWrite(ledDisplay.colSelectPins[ledDisplay.colSelect], HIGH);
+    digitalWrite(ledColPins[ledColSelect], HIGH);
 }
 
 #ifdef __MK1_HW
@@ -178,9 +185,9 @@ void initDisplayTimer()
 {
     interruptCount = 0;
     
-    timer0 = timerBegin(0, 80, true);
+    timer0 = timerBegin(0, TIMER0_PRESCALE, true);
     timerAttachInterrupt(timer0, &displayInterrupt, true);
-    timerAlarmWrite(timer0, DISP_INT_100US * 100, true);
+    timerAlarmWrite(timer0, TIMER0_RELOAD, true);
     timerAlarmEnable(timer0);
 }
 
@@ -264,18 +271,18 @@ void initDisplay()
 
     for(c = 0; c < MAX_ROWS; c++)
     {
-        pinMode(ledDisplay.rowDataPins[c], OUTPUT);
-        digitalWrite(ledDisplay.rowDataPins[c], LOW);
+        pinMode(ledRowPins[c], OUTPUT);
+        digitalWrite(ledRowPins[c], LOW);
     }
 
     for(c = 0; c < MAX_COLS; c++)
     {
-        ledDisplay.data[c] = 0;
-        pinMode(ledDisplay.colSelectPins[c], OUTPUT);
-        digitalWrite(ledDisplay.colSelectPins[c], LOW);
+        ledColData[c] = 0;
+        pinMode(ledColPins[c], OUTPUT);
+        digitalWrite(ledColPins[c], LOW);
     }
 
-    ledDisplay.colSelect = 0;
+    ledColSelect = 0;
 }
 
 int splitTime(time_t epoch, timeNow_t *timeStruct)
@@ -296,15 +303,16 @@ int splitTime(time_t epoch, timeNow_t *timeStruct)
 
 void ledShowTime(timeNow_t *timeStruct)
 {
-#ifdef __MK2_HW
+    int tmpDisp[2];
 
+#ifdef __MK2_HW
     int c;
 
     if(digitalRead(PIN_BOOT) == LOW)
     {
         for(c = 0; c < MAX_COLS; c++)
         {
-            ledDisplay.data[c] = 0x0f;
+            ledColData[c] = 0x0f;
         }
     }
     else
@@ -312,29 +320,32 @@ void ledShowTime(timeNow_t *timeStruct)
 
 #endif
 
+        // use tmpDisp to stop flickering NTP-sync and am/pm lights
         if(digitalRead(PIN_MODESEL) == LOW && timeStruct -> tm_hour >= 12)
         {
             timeStruct -> tm_hour = timeStruct -> tm_hour - 12;
 
-            splitDigit(timeStruct -> tm_hour, &ledDisplay.data[0]);
+            splitDigit(timeStruct -> tm_hour, &tmpDisp[0]);
         
             // most significant hour bit is used to drive AM/PM indicator
-            ledDisplay.data[0] = ledDisplay.data[0] | BIT_AMPM;
+            tmpDisp[0] = tmpDisp[0] | BIT_AMPM;
         }
         else
         {
-            splitDigit(timeStruct -> tm_hour, &ledDisplay.data[0]);
+            splitDigit(timeStruct -> tm_hour, &tmpDisp[0]);
         }
 
 #ifdef __MK2_HW
         if(ntpSyncState == HIGH)
         { 
-            ledDisplay.data[0] = ledDisplay.data[0] | BIT_SYNCLED; 
+            tmpDisp[0] = tmpDisp[0] | BIT_SYNCLED; 
         }
 #endif
 
-        splitDigit(timeStruct -> tm_min, &ledDisplay.data[2]);
-        splitDigit(timeStruct -> tm_sec, &ledDisplay.data[4]);     
+        ledColData[0] = tmpDisp[0];
+        ledColData[1] = tmpDisp[1];
+        splitDigit(timeStruct -> tm_min, &ledColData[2]);
+        splitDigit(timeStruct -> tm_sec, &ledColData[4]);     
 
 #ifdef __MK2_HW
     }
@@ -343,10 +354,10 @@ void ledShowTime(timeNow_t *timeStruct)
 
 void ledShowDate(timeNow_t *timeStruct)
 {
-    splitDigit(timeStruct -> tm_mday, &ledDisplay.data[0]);
-    ledDisplay.data[2] = 0;
-    ledDisplay.data[3] = 0;
-    splitDigit(timeStruct -> tm_mon, &ledDisplay.data[4]);
+    splitDigit(timeStruct -> tm_mday, &ledColData[0]);
+    ledColData[2] = 0;
+    ledColData[3] = 0;
+    splitDigit(timeStruct -> tm_mon, &ledColData[4]);
 }
 
 #ifdef __TEST_DISPLAY
@@ -360,21 +371,21 @@ void testDisplay()
       for(c = 0; c < MAX_COLS; c++)
       {
           Serial.print("Column: ");
-          Serial.println(ledDisplay.colSelectPins[c]);
-          digitalWrite(ledDisplay.colSelectPins[c], HIGH);
+          Serial.println(ledColPins[c]);
+          digitalWrite(ledColPins[c], HIGH);
 
-          for(d = 0; d < ledDisplay.colDataSize[c]; d++)
+          for(d = 0; d < ledColSize[c]; d++)
           {
               Serial.print("Row: ");
-              Serial.println(ledDisplay.rowDataPins[d]);
-              digitalWrite(ledDisplay.rowDataPins[d], HIGH);
+              Serial.println(ledRowPins[d]);
+              digitalWrite(ledRowPins[d], HIGH);
 
               delay(500);
 
-              digitalWrite(ledDisplay.rowDataPins[d], LOW);
+              digitalWrite(ledRowPins[d], LOW);
           }
 
-          digitalWrite(ledDisplay.colSelectPins[c], LOW);
+          digitalWrite(ledColPins[c], LOW);
 
           delay(500);
       }
@@ -396,9 +407,9 @@ void initDisplayPattern()
     c = 0;
     while(c < MAX_COLS)
     {
-        ledDisplay.data[c] = 0x0f;
+        ledColData[c] = 0x0f;
         delay(100);
-        ledDisplay.data[c] = 0;
+        ledColData[c] = 0;
 
         c++;
     }
@@ -406,9 +417,9 @@ void initDisplayPattern()
     c = c - 2;
     while(c >= 0)
     {
-        ledDisplay.data[c] = 0x0f;
+        ledColData[c] = 0x0f;
         delay(100);
-        ledDisplay.data[c] = 0;
+        ledColData[c] = 0;
 
         c--;      
     }
@@ -441,6 +452,151 @@ void resetTickTime()
     lastMillis = millis();
 }
 
+boolean updateClock()
+{
+    boolean rtn;
+
+    rtn = false;
+                    if(WiFi.status() == WL_CONNECTED)
+                    { 
+                        ntpUpdates++;
+                        reachability = reachability << 1;
+                        Serial.print("[UPDT] Sending NTP update time request - ");
+                        Serial.println(ntpUpdates);
+
+                        // forceUpdate() times out after 1second if there's no response
+                        if(timeClient.forceUpdate() == true)
+                        {
+                            Serial.println("[UPDT] NTP response received");
+                            reachability = reachability | 0x01;
+
+                            if(ntpUpdates == clockConfig.syncValid)
+                            {
+                                syncLed(HIGH);
+                                updateTime = clockConfig.syncUpdate;
+                            }
+
+                            rtn = true;
+                        }
+                        else
+                        {
+                            Serial.println("[UPDT] Timedout waiting for NTP response");
+                        }
+                    }
+                    else
+                    {
+                        Serial.println("[UPDT] WiFi has disconnected");
+                    }
+
+    return rtn;
+}
+
+void correctTime()
+{
+    time_t epoch;
+    TimeChangeRule *tcr;
+    int dayOfMonth;
+
+    // get time from NTP library
+    // seconds since start of time
+    epoch = timeClient.getEpochTime();
+ 
+    // convert to uk time with bst or gmt
+    epoch = ukTime.toLocal(epoch, &tcr);
+    dayOfMonth = splitTime(epoch, &timeNow);
+            
+    // Reset reSyncCount when day changes
+    if(dayOfMonth != timeNow.tm_mday)
+    {
+        reSyncCount = 0;
+    }
+
+    // send everything to serial port
+    serialShowTime(&timeNow, tcr -> abbrev);
+}
+
+boolean handleButtons()
+{
+    boolean rtn;
+
+    rtn = true;
+    // If button pressed, send the time in morse code
+    if(digitalRead(PIN_MORSETIME) == LOW)
+    {
+        Serial.print("[MRSE] ");
+        if(digitalRead(PIN_DATETIME) == LOW)
+        {
+            Serial.println("Sending IP address");
+            ipAddressInMorse();
+        }
+        else
+        {
+            Serial.println("Sending time in morse");
+            timeInMorse();
+        }
+    }
+    else
+    {
+        if(digitalRead(PIN_DATETIME) == LOW)
+        {
+            Serial.println("[DATE] Show date");
+            ledShowDate(&timeNow);                
+        }
+        else
+        {
+            rtn = false;
+        }
+    }
+
+    return rtn;
+}
+
+void hourlyChime()
+{
+    // If enabled, chime hour in morse code, once, on the hour
+    if(timeNow.tm_min == 0 && chimesEnabled() == true)
+    {
+        if(chimedAlready == false)
+        {
+            Serial.println("[CHME] Hourly chime");
+            chimeMorse();
+            chimedAlready = true;
+        }
+    }
+    else
+    {
+        chimedAlready = false;
+    }
+}
+
+void startNtpClient()
+{
+    Serial.print(" - NTP client started with server ");
+    Serial.println(clockConfig.ntpServer);
+    timeClient.setPoolServerName(clockConfig.ntpServer);
+    timeClient.begin(NTP_PORT);
+    updateTime = clockConfig.initUpdate;
+    ntpUpdates = 0;
+}
+
+#ifdef __WITH_TELNET
+void startTelnetServer()
+{
+    Serial.print(" - Telnet server started, listening on port ");
+    Serial.println(TELNET_PORT);
+    telnetServer.begin();
+}
+#endif
+
+#ifdef __WITH_HTTP
+void startWebserver()
+{
+    Serial.print(" - Webserver started, listening on port ");
+    Serial.println(HTTP_PORT);
+    httpServer.begin();
+}
+#endif
+               
 void setup()
 {
     // Serial port
@@ -504,29 +660,6 @@ void setup()
     // LED display
     initDisplay();
 
-    Serial.println(" - initDisplayTimer()");
-    // Display interrupt and handler
-    initDisplayTimer();
-
-    Serial.println(" - initDisplayPattern()");
-    // Display a pattern
-    initDisplayPattern();
-
-    Serial.println(" - One beep");
-    // One beep
-    digitalWrite(PIN_BEEP, HIGH);
-    delay(MORSE_DELAY);
-    digitalWrite(PIN_BEEP, LOW);
-
-#ifdef __TEST_DISPLAY
-
-    while(1)
-    {
-        testDisplay();
-    }
-
-#endif
-
     Serial.println(" - getClockConfig()");
     // Read configuration from flash memory
     // Will use defaults if nothing found and compiled with __USE_DEFAULTS set
@@ -535,18 +668,22 @@ void setup()
     {
         // If there's no configuration, display a "X" and start command line
         // Keep on until there's some configuration to use...
-      
-        ledDisplay.data[2] = 5;
-        ledDisplay.data[3] = 2;
-        ledDisplay.data[4] = 5;
+
+        ledColData[0] = 0;
+        ledColData[1] = 0;
+        ledColData[2] = 5;
+        ledColData[3] = 2;
+        ledColData[4] = 5;
               
         Serial.println("No configuration found in FLASH!!");
 
         commandInterpretter();
 
-        ledDisplay.data[2] = 0;
-        ledDisplay.data[3] = 0;
-        ledDisplay.data[4] = 0;      
+        ledColData[0] = 0;
+        ledColData[1] = 0;
+        ledColData[2] = 0;
+        ledColData[3] = 0;
+        ledColData[4] = 0;      
     }
     
     // State machine
@@ -557,27 +694,46 @@ void setup()
     
     reSyncCount = 0;
     reachability = 0;
-    chime = true;
+    chimedAlready = false;
 
-    Serial.println("");
-    Serial.println("******* Showtime !!!");
+    Serial.println(" - initDisplayTimer()");
+    // Display interrupt and handler
+    initDisplayTimer();
+    
+    Serial.println(" - initDisplayPattern()");
+    // Display a pattern
+    initDisplayPattern();
+
+    Serial.println(" - morseBeep()");
+    morseBeep(MORSE_DELAY);
+#ifdef __TEST_DISPLAY
+
+    while(1)
+    {
+        testDisplay();
+    }
+
+#endif
+
+    Serial.println("*******************");
+    Serial.println("***  R E A D Y  ***");
+    Serial.println("*******************");
     Serial.println("");
 
 }
 
 void loop()
 {
-    int ledState;
-    time_t epoch;
-    TimeChangeRule *tcr;
 #ifdef __WITH_TELNET
-    WiFiClient wc;
+    WiFiClient telnetClient;
 #endif
 
     switch(clockState)
     {
         case STATE_INIT:
-            Serial.println("***  Starting  ***");
+            Serial.println("*************************");
+            Serial.println("***  S T A R T I N G  ***");
+            Serial.println("*************************");
 #ifdef __WITH_HTTP
             if(digitalRead(PIN_MORSETIME) == LOW || digitalRead(PIN_DATETIME) == LOW)
             {
@@ -596,6 +752,7 @@ void loop()
                 Serial.println(" - Timing mode");
 #endif
 
+                Serial.println(" - Connecting to WiFi network...");
                 WiFi.begin(clockConfig.ssid, clockConfig.password);
 #ifdef __MK1_HW
                 ledState = LOW;
@@ -617,32 +774,22 @@ void loop()
         case STATE_CONNECTING:
             if(WiFi.status() == WL_CONNECTED)
             {
-                Serial.println(" - Wifi connected");
+                clockState = STATE_TIMING;
+
+                Serial.println(" - WiFi connected");
                 printWifiStatus();
 #ifdef __MK1_HW
                 digitalWrite(LED_BUILTIN, HIGH);
 #else
                 neopixelWrite(PIN_NEOPIXEL, RGB_OFF, RGB_VAL, RGB_OFF);
 #endif
-                Serial.print(" - Starting NTP - ");
-                Serial.println(clockConfig.ntpServer);
-                timeClient.setPoolServerName(clockConfig.ntpServer);
-                timeClient.setUpdateInterval(clockConfig.syncUpdate * 1000);
-                timeClient.begin(NTP_PORT);
-                clockState = STATE_TIMING;
-                updateTime = clockConfig.initUpdate;
-                ntpUpdates = 0;
                 ticks = 0;
+                startNtpClient();
 #ifdef __WITH_TELNET
-                ws.begin();
-                Serial.println(" - Telnet server started");
+                startTelnetServer();
 #endif
 #ifdef __WITH_HTTP
-                httpServer.begin();
-                Serial.println(" - Webserver started");
-                
-                // Only whilst testing...
-                // httpWebServer();
+                startWebserver();
 #endif
             }
             else
@@ -685,111 +832,43 @@ void loop()
             if(tickTimeExpired() == true)
             {
                 if(ticks == 0)
-                {              
-                    if(WiFi.status() == WL_CONNECTED)
-                    { 
-                        reachability = reachability << 1;
-                        if(timeClient.forceUpdate() == true)
-                        {
-                            Serial.println("  <NTP update>");
-                            ticks = updateTime - 1;
-                            reachability = reachability | 0x01;
-                            ntpUpdates++;
-
-                            if(ntpUpdates == clockConfig.syncValid)
-                            {
-                                syncLed(HIGH);
-                                updateTime = clockConfig.syncUpdate;
-                            }
-                      
-                        }
-                        else
-                        {
-                            Serial.println("  <NTP timeout>");
-                            clockState = STATE_STOPPED;
-                        }
+                {
+                    // Send NTP time request
+                    if(updateClock() == true)
+                    {
+                        ticks = updateTime - 1;
                     }
                     else
                     {
-                        Serial.println("  <Wifi disconnected>");
                         clockState = STATE_STOPPED;
-                    }
+                    }                    
                 }
                 else
                 {
                     ticks--;
                 }
 
-                // get time from NTP library
-                // seconds since start of time
-                epoch = timeClient.getEpochTime();
- 
-                // convert to uk time with bst or gmt
-                epoch = ukTime.toLocal(epoch, &tcr);
-                dayOfMonth = splitTime(epoch, &timeNow);
-            
-                // Reset reSyncCount when day changes
-                if(dayOfMonth != timeNow.tm_mday)
-                {
-                    reSyncCount = 0;
-                }
-
-                // send everything to serial port
-                serialShowTime(&timeNow, tcr -> abbrev);
- 
+                // Apply daylight saving
+                correctTime();
+                
                 lastMillis = millis();
-            }  
-
-            // If button pressed, send the time in morse code
-            if(digitalRead(PIN_MORSETIME) == LOW)
-            {
-                if(digitalRead(PIN_DATETIME) == LOW)
-                {
-                    Serial.println("  <IP address in morse>");
-                    ipAddressInMorse();
-                }
-                else
-                {
-                    Serial.println("  <Time in morse>");
-                    timeInMorse();
-                }
-            }
-            else
-            {
-                if(digitalRead(PIN_DATETIME) == LOW)
-                {
-                    Serial.println("  <Show date>");
-                    ledShowDate(&timeNow);                
-                }
-                else
-                {
-                    ledShowTime(&timeNow);
-                }
-            }
-
-            // If enabled, chime hour in morse code, once, on the hour
-            if(timeNow.tm_min == 0 && chimesEnabled() == true)
-            {
-                if(chime == true)
-                {
-                    Serial.println("  <Hourly chime>");
-                    chimeMorse();
-                    chime = false;
-                }
-            }
-            else
-            {
-                chime = true;
             }
                 
+            if(handleButtons() == false)
+            {
+                ledShowTime(&timeNow);              
+            }
+
+            hourlyChime();
+            
 #ifdef __WITH_TELNET
             // If someone's connected with telnet, deal with it
-            wc = ws.available();
-            if(wc.connected())
+            telnetClient = telnetServer.available();
+            if(telnetClient.connected())
             {
-                telnetShowStatus(wc);
-                wc.flush();
-                wc.stop();
+                telnetShowStatus(telnetClient);
+                telnetClient.flush();
+                telnetClient.stop();
             }
 #endif
 
@@ -804,17 +883,24 @@ void loop()
             }
 #endif
             break;
-
+ 
         case STATE_STOPPED:
-            Serial.println("*** Stopped");
+            Serial.println("***********************");
+            Serial.println("***  S T O P P E D  ***");
+            Serial.println("***********************");
             timeClient.end();
+#ifdef __WITH_TELNET
+            telnetServer.end();
+#endif
+#ifdef __WITH_HTTP
+            httpServer.end();
+#endif
 #ifdef __MK1_HW
             WiFi.end();
             digitalWrite(LED_BUILTIN, LOW);
 #else
             WiFi.disconnect();
 #endif
-            syncLed(LOW);
             clockState = STATE_INIT;
             break;
 

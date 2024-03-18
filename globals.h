@@ -14,14 +14,11 @@ char *paramPtr[MAX_PARAMS];
 int paramCount;
 int ntpSyncState;
 
-volatile ledDisplay_t ledDisplay =
-{
-    { PIN_COLH1, PIN_COLH2, PIN_COLM1, PIN_COLM2, PIN_COLS1, PIN_COLS2 },  // column select pins h-h-m-m-s-s
-    { 4,  4,  3,  4,  3,  4 },                                             // number of leds on this column hh:mm:ss
-    { PIN_DATA1, PIN_DATA2, PIN_DATA3, PIN_DATA4 },                        // data pins          lsb first
-    { 0, 0, 0, 0, 0, 0 },                                                  // display data
-    0,                                                                     // current column selection
-};
+volatile int ledColSelect;
+int ledColPins[MAX_COLS] = { PIN_COLH1, PIN_COLH2, PIN_COLM1, PIN_COLM2, PIN_COLS1, PIN_COLS2 };  // column select pins h-h-m-m-s-s
+int ledColSize[MAX_COLS] = { 4, 4, 3, 4, 3, 4 };                                                  // number of leds on this column hh:mm:ss
+int ledColData[MAX_COLS] = { 0, 0, 0, 0, 0, 0 };                                                  // display data
+int ledRowPins[MAX_ROWS] = { PIN_DATA1, PIN_DATA2, PIN_DATA3, PIN_DATA4 };                        // data pins          lsb first
 
 char *dayStrings[] =
 {
@@ -35,7 +32,7 @@ char *dayStrings[] =
 };
 
 #ifdef __WITH_HTTP
-WiFiServer httpServer(80);
+WiFiServer httpServer(HTTP_PORT);
 WiFiClient httpClient;
 #endif
 
@@ -55,7 +52,11 @@ extern eepromData clockConfig;
 extern char serialBuff[];
 extern char *paramPtr[];
 extern int paramCount;
-extern volatile ledDisplay_t ledDisplay;
+extern volatile int ledColSelect;
+extern int ledColPins[];
+extern int ledColSize[];
+extern int ledColData[];
+extern int ledRowPins[];
 extern WiFiServer httpServer;
 extern WiFiClient httpClient;
 extern int updateTime;
