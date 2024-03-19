@@ -4,6 +4,7 @@
 #include <WiFi101.h>
 #else
 #include <WiFi.h>
+#include <FFat.h>
 #endif
 
 #include "types.h"
@@ -243,6 +244,38 @@ void httpSaveConfiguration()
     saveClockConfig();
     httpDone = true;
 }
+
+#ifdef __MK2_HW
+
+boolean httpGetRealFile(char *fName)
+{
+    File fp;
+    unsigned char dBuff[128];
+    int readed;
+
+    fp = FFat.open(paramPtr[0]);
+    if(fp)
+    {
+        Serial.printf("Sending %s\r\n", fName);
+        do
+        {
+            readed = fp.read(dBuff, 128);
+            httpClient.write(dBuff, readed);
+        }
+        while(readed == 128);
+        fp.close();
+        httpClient.flush();
+
+        return true;
+    }
+    else
+    {
+        Serial.printf("Can't open %s for reading\r\n", fName);
+        return false;
+    }
+}
+
+#endif
 
 void httpNotFound()
 {
