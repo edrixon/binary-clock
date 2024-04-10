@@ -25,6 +25,8 @@ void cmdDirectory();
 void cmdDump();
 void cmdFormat();
 void cmdRename();
+void cmdHostname();
+void cmdTypeFile();
 #endif
 void cmdWebConfig();
 void cmdListCommands();

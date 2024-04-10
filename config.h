@@ -1,10 +1,17 @@
 //#define __MK1_HW                // Original 2019 Veroboard version with MKR1000 processor
 #define __MK2_HW                 // 2024 PCB version with ESP32 S3 processor
-
+                                 //  Board: Adafruit Feather ESP32-S3 2MB PSRAM
+                                 //  Flash mode: QIO 80MHz
+                                 //  Flash size: 4MB
+                                 //  Partition scheme: Default 4MB with ffat (1.2MB app/1.5MB FATFS)
+                                 //  PSRAM: QSPI RAM
+                                 //
+                                 
 //#define __TEST_DISPLAY          // Just do display test and nothing else...
 #define __USE_DEFAULTS           // Load default configuration if nothing else already stored.  Otherwise, boot to CLI for user configuration
 #define __WITH_TELNET            // To allow telnet connection for a status page
-#define __WITH_HTTP              // To enable configuration web page
+#define __WITH_HTTP              // To enable configuration and status web pages
+#define __WITH_OTA               // To enable OTA updates with Arduino IDE
 
 // Printed on serial port when board starts
 #define HELLO_STR      "** NTP clock by Ed Rixon, GD6XHG **"
@@ -29,6 +36,8 @@
 #define HTTP_PORT      80        // Port for webserver to listen on
 #endif
 
+#define OTA_PORT       3232      // Port for ArduinoOTA updater
+
 // Command line interpretter
 #define SERBUFF_LEN    80        // Command line buffer size
 #define CLI_PROMPT     "clock> " // Prompt
@@ -45,6 +54,7 @@
 #define DEFAULT_SSID   "ballacurmudgeon"
 #define DEFAULT_PSWD   "scaramanga"
 #define DEFAULT_NTPS   "ubuntu.pool.ntp.org"
+#define DEFAULT_HOSTNAME "ntpclock"
 
 // Access point setup for configuration mode
 #define AP_SSID        "NTPClock"

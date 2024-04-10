@@ -25,6 +25,9 @@
 
 cmdType cmdList[] =
 {
+#ifdef __MK2_HW
+    { "cat",       cmdTypeFile },
+#endif
     { "clear",     cmdClearConfig },
 #ifdef __MK2_HW
     { "cp",        cmdCopy },
@@ -35,6 +38,9 @@ cmdType cmdList[] =
     { "hd", cmdDump },
 #endif
     { "help",      cmdListCommands },
+#ifdef __MK2_HW
+    { "hostname",  cmdHostname },
+#endif
     { "initupdate", cmdInitUpdate },
     { "load",      cmdGetConfig },
 #ifdef __MK2_HW
@@ -342,6 +348,8 @@ void cmdShowState()
     Serial.println(clockConfig.password);
     Serial.print("  NTP server       : ");
     Serial.println(clockConfig.ntpServer);
+    Serial.print("  Clock hostname   : ");
+    Serial.println(clockConfig.hostName);
     Serial.print("  Updates for sync : ");
     Serial.println(clockConfig.syncValid);
     Serial.print("  Initial update   : ");
@@ -648,6 +656,47 @@ void cmdDirectory()
     Serial.printf("Total space %ld bytes\r\n", FFat.totalBytes());
     Serial.printf("Free space %ld bytes\r\n", FFat.freeBytes());
 
+}
+
+void cmdHostname()
+{
+    if(paramPtr[0] != NULL)
+    {
+         strncpy(clockConfig.hostName, paramPtr[0], 32);
+    }
+
+    Serial.print("Hostname: ");
+    Serial.print(clockConfig.hostName);
+    Serial.println("");
+}
+
+void cmdTypeFile()
+{
+    File fp;
+    unsigned char dBuff[16];
+    int readed;
+    int c;
+
+    fp = FFat.open(paramPtr[0]);
+    if(fp)
+    {
+        do
+        {
+            readed = fp.read(dBuff, 16);
+
+            for(c = 0; c < readed; c++)
+            {
+                Serial.printf("%c", dBuff[c]);
+            }
+        }
+        while(readed == 16);
+        fp.close();
+        Serial.println("");
+    }
+    else
+    {
+        Serial.printf("Can't open %s for reading\r\n", paramPtr[0]);
+    }
 }
 
 #endif

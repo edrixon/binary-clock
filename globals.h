@@ -45,6 +45,7 @@ long ticks;
 
 volatile unsigned long int interruptCount;
 
+boolean loggedIn;
 
 #else
 
@@ -67,6 +68,7 @@ extern volatile unsigned long int interruptCount;
 extern long ticks;
 extern char *dayStrings[];
 extern int ntpSyncState;
+extern boolean loggedIn;
 
 #endif
 

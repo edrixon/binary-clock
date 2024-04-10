@@ -1,0 +1,202 @@
+<html>
+
+<head>
+  <meta name='viewport' content='width=device-width, initial-scale=1.0'/>
+  <meta charset='utf-8'>
+  <style>
+    .main {
+	  text-align: center;
+	  margin: auto;
+      font-family: Georgia, serif;
+	} 
+	.header {
+	  font-style: italic;
+	}
+    .content {
+	  text-align: left;
+	  display: table;
+	  width: 350px;
+	  margin: auto;
+	  border: 5px solid blue;
+	  border-radius: 15px;
+	  padding: 10px 10px 10px 10px;
+	}
+	.confighelp {
+	  font-size: 95%;
+	  padding: 10px 10px 10px 10px;
+	}
+	.footer {
+	  text-align: right;
+	  font-size: 60%;
+	  padding: 10px 10px 10px 10px;
+	}
+    .led {
+      height: 20px;
+      width: 20px;
+      background-color: #555;
+      border-radius: 50%;
+	  margin: 5px;
+    }
+	.column {
+      float: left;
+	  margin: 10px;
+	}
+	.clockstate {
+	  font-weight: bold;
+	  font-size: 105%;
+	}
+  </style>
+  
+  <script> 
+    function updateClockState() 
+    {  
+     
+    var ajaxRequest = null;
+    if (window.XMLHttpRequest)  { ajaxRequest =new XMLHttpRequest(); }
+    else                        { ajaxRequest =new ActiveXObject("Microsoft.XMLHTTP"); }
+ 
+      if(!ajaxRequest){ alert('AJAX is not supported.'); return; }
+ 
+      ajaxRequest.open('GET',"/getClockState",true);
+      ajaxRequest.onreadystatechange = function()
+      {
+        if(ajaxRequest.readyState == 4 && ajaxRequest.status == 200)
+        {
+          var ajaxResult = ajaxRequest.responseText;
+          var tmpArray = ajaxResult.split("|");
+          document.getElementById('ssid').innerHTML = tmpArray[0];
+          document.getElementById('rssi').innerHTML = tmpArray[1];
+          document.getElementById('server').innerHTML = tmpArray[2];
+          document.getElementById('reachability').innerHTML = tmpArray[3];
+          document.getElementById('resyncs').innerHTML = tmpArray[4];
+          document.getElementById('syncstate').innerHTML = tmpArray[5];
+          document.getElementById('chimes').innerHTML = tmpArray[6];
+        }
+      }
+      ajaxRequest.send();
+    }
+	
+    function updateLedState() 
+    {  
+     
+    var ajaxRequest = null;
+    if (window.XMLHttpRequest)  { ajaxRequest =new XMLHttpRequest(); }
+    else                        { ajaxRequest =new ActiveXObject("Microsoft.XMLHTTP"); }
+ 
+      if(!ajaxRequest){ alert('AJAX is not supported.'); return; }
+ 
+      ajaxRequest.open('GET',"/getLedData",true);
+      ajaxRequest.onreadystatechange = function()
+      {
+        if(ajaxRequest.readyState == 4 && ajaxRequest.status == 200)
+        {
+          var ajaxResult = ajaxRequest.responseText;
+          var tmpArray = ajaxResult.split("|");
+          document.getElementById('syncled').style = "background-color:"+tmpArray[25];
+          document.getElementById('modeled').style = "background-color:"+tmpArray[24];
+          document.getElementById('l23').style = "background-color:"+tmpArray[23];
+          document.getElementById('l22').style = "background-color:"+tmpArray[22];
+          document.getElementById('l21').style = "background-color:"+tmpArray[21];
+          document.getElementById('l20').style = "background-color:"+tmpArray[20];
+          document.getElementById('l18').style = "background-color:"+tmpArray[18];
+          document.getElementById('l17').style = "background-color:"+tmpArray[17];
+          document.getElementById('l16').style = "background-color:"+tmpArray[16];
+          document.getElementById('l15').style = "background-color:"+tmpArray[15];
+          document.getElementById('l14').style = "background-color:"+tmpArray[14];
+          document.getElementById('l13').style = "background-color:"+tmpArray[13];
+          document.getElementById('l12').style = "background-color:"+tmpArray[12];
+          document.getElementById('l10').style = "background-color:"+tmpArray[10];
+          document.getElementById('l9').style = "background-color:"+tmpArray[9];
+          document.getElementById('l8').style = "background-color:"+tmpArray[8];
+          document.getElementById('l7').style = "background-color:"+tmpArray[7];
+          document.getElementById('l6').style = "background-color:"+tmpArray[6];
+          document.getElementById('l5').style = "background-color:"+tmpArray[5];
+          document.getElementById('l4').style = "background-color:"+tmpArray[4];
+          document.getElementById('l1').style = "background-color:"+tmpArray[1];
+          document.getElementById('l0').style = "background-color:"+tmpArray[0];
+        }
+      }
+      ajaxRequest.send();
+    }
+ 
+    var myVar1 = setInterval(updateClockState, 5000);  
+    var myVar2 = setInterval(updateLedState, 1000);  
+ 
+  </script>
+
+  
+</head>
+
+<body>
+  <div class="main">
+    <div class="header">
+	  <h2>GD6XHG binary clock</h2>
+	</div>
+    <div class="content"> 
+    <div class="column">
+      <div class="led" style="background-color:white"></div>
+      <div class="led" style="background-color:white"></div>
+      <div class="led" style="background-color:white"></div>
+      <div id='syncled' class="led"></div>
+    </div>
+    <div class="column">
+      <div id='modeled' class="led"></div>
+      <div id='l2' class="led" style="background-color:white"></div>
+      <div id='l1' class="led"></div>
+      <div id='l0' class="led"></div>
+    </div>
+      <div class="column">
+      <div id='l7' class="led" style="background-color:green"></div>
+      <div id='l6' class="led"></div>
+      <div id='l5' class="led"></div>
+      <div id='l4' class="led"></div>
+    </div>
+      <div class="column">
+      <div id='l11' class="led" style="background-color:white"></div>
+      <div id='l10' class="led"></div>
+      <div id='l9' class="led"></div>
+      <div id='l8' class="led"></div>
+    </div>
+    <div class="column">
+      <div id='l15' class="led" style="background-color:orange"></div>
+      <div id='l14' class="led"></div>
+      <div id='l13' class="led"></div>
+      <div id='l12' class="led"></div>
+    </div>
+    <div class="column">
+      <div id='l19' class="led" style="background-color:white"></div>
+      <div id='l18' class="led"></div>
+      <div id='l17' class="led"></div>
+      <div id='l16' class="led"></div>
+    </div>
+    <div class="column">
+      <div id='l23' class="led" style="background-color:blue"></div>
+      <div id='l22' class="led"></div>
+      <div id='l21' class="led"></div>
+      <div id='l20' class="led"></div>
+    </div>
+  </div>
+
+  <div class="content">
+    <p>SSID: <span id='ssid' class="clockstate">some-ssid</span></p>
+    <p>RSSI: <span id='rssi' class="clockstate">-99</span><span class="clockstate"> dBm</span></p>
+    <p>NTP server: <span id='server' class="clockstate">ntp.server.com</span></p>
+    <p>Reachability: <span id='reachability' class="clockstate">0x??</span></p>
+    <p>Resyncs today: <span id='resyncs' class="clockstate">??</span></p>
+    <p>Synchronised: <span id='syncstate' class="clockstate">???</span></p>
+	<p>Hourly chimes: <span id='chimes' class="clockstate">???</span></p>
+  </div>
+
+  <div class="content confighelp">
+    <p>To start configuration mode, power up with <i>'mode'</i> or <i>'morse'</i> buttons pressed.</p>
+    <p>The clock will start a WiFi access point with SSID <i>'NTPClock'</i>.  Connect to that and browse to <i>'http://192.168.1.1'</i> to complete setup.</p>
+    <p>Configuration can also be done using the CLI with the USB serial port at 9600 baud.</p>
+  </div>
+  
+  <div class="content footer">
+    <p>Software version 1.0, Ed Rixon GD6XHG, April 2024</p>
+  </div>
+    
+</body>
+
+</html>

@@ -19,10 +19,15 @@
 #else
 #include <WiFi.h>
 #include <FFat.h>
+#include <ESPmDNS.h>
 #endif
 #include <WiFiUdp.h>
 #include <TimeLib.h>
 #include <Timezone.h>
+
+#ifdef __WITH_OTA
+#include <ArduinoOTA.h>
+#endif
 
 #define __IN_MAIN
 
@@ -75,6 +80,7 @@ void defaultClockConfig()
     strcpy(clockConfig.ssid, DEFAULT_SSID);
     strcpy(clockConfig.password, DEFAULT_PSWD);
     strcpy(clockConfig.ntpServer, DEFAULT_NTPS);
+    strcpy(clockConfig.hostName, DEFAULT_HOSTNAME);
     clockConfig.initUpdate = INIT_UPDATE;
     clockConfig.syncUpdate = SYNC_UPDATE;
     clockConfig.syncValid = SYNC_VALID;  
@@ -261,6 +267,97 @@ void initDelay()
     // Red
     neopixelWrite(PIN_NEOPIXEL, RGB_VAL, RGB_OFF, RGB_OFF);
 }
+
+void initMDNS()
+{
+    if(MDNS.begin(clockConfig.hostName))
+    {
+        Serial.printf(" - mDNS responder (%s)\r\n", clockConfig.hostName);
+    }
+    else
+    {
+        Serial.println(" - error setting up mDNS responder");      
+    }
+}
+
+#ifdef __WITH_OTA
+
+void initArduinoOTA()
+{
+    Serial.printf(" - ArduinoOTA (%s, port %d)\r\n", clockConfig.hostName, OTA_PORT);
+  
+    ArduinoOTA.setHostname(clockConfig.hostName);
+    ArduinoOTA.setPort(OTA_PORT);
+
+    ArduinoOTA
+     .onStart([]()
+     {
+        String type;
+        if(ArduinoOTA.getCommand() == U_FLASH)
+        {
+            type = "sketch";
+        }
+        else // U_SPIFFS
+        {
+            type = "filesystem";
+        }
+
+        // NOTE: if updating SPIFFS this would be the place to unmount SPIFFS using SPIFFS.end()
+        FFat.end();
+        Serial.println("Start updating " + type);
+    })
+    
+    .onEnd([]()
+    {
+        Serial.println("");
+        Serial.println("Update finished");
+    })
+    
+    .onProgress([](unsigned int progress, unsigned int total)
+    {
+        unsigned long int pcent;
+
+        pcent = progress / (total / 100);
+        if(pcent % 10 == 0)
+        {
+            Serial.printf("Progress: %u%%\r\n", pcent);
+        }
+    })
+    
+    .onError([](ota_error_t error)
+    {
+        Serial.printf("Error[%u]: ", error);
+        switch(error)
+        {
+            case OTA_AUTH_ERROR:
+                Serial.println("Auth failed");
+                break;
+                
+            case OTA_BEGIN_ERROR:
+                Serial.println("Begin failed");
+                break;
+                
+            case OTA_CONNECT_ERROR:
+                Serial.println("Connect failed");
+                break;
+                
+            case OTA_RECEIVE_ERROR:
+                Serial.println("Receive failed");
+                break;
+                
+            case OTA_END_ERROR:
+                Serial.println("End failed");
+                break;
+
+            default:
+                Serial.println("Unknown error!");
+        }
+    });
+
+    ArduinoOTA.begin();
+}
+
+#endif
 
 #endif
 
@@ -457,36 +554,37 @@ boolean updateClock()
     boolean rtn;
 
     rtn = false;
-                    if(WiFi.status() == WL_CONNECTED)
-                    { 
-                        ntpUpdates++;
-                        reachability = reachability << 1;
-                        Serial.print("[UPDT] Sending NTP update time request - ");
-                        Serial.println(ntpUpdates);
+    
+    if(WiFi.status() == WL_CONNECTED)
+    { 
+        ntpUpdates++;
+        reachability = reachability << 1;
+        Serial.print("[UPDT] Sending NTP update time request - ");
+        Serial.println(ntpUpdates);
 
-                        // forceUpdate() times out after 1second if there's no response
-                        if(timeClient.forceUpdate() == true)
-                        {
-                            Serial.println("[UPDT] NTP response received");
-                            reachability = reachability | 0x01;
+        // forceUpdate() times out after 1second if there's no response
+        if(timeClient.forceUpdate() == true)
+        {
+            Serial.println("[UPDT] NTP response received");
+            reachability = reachability | 0x01;
 
-                            if(ntpUpdates == clockConfig.syncValid)
-                            {
-                                syncLed(HIGH);
-                                updateTime = clockConfig.syncUpdate;
-                            }
+            if(ntpUpdates == clockConfig.syncValid)
+            {
+                syncLed(HIGH);
+                updateTime = clockConfig.syncUpdate;
+            }
 
-                            rtn = true;
-                        }
-                        else
-                        {
-                            Serial.println("[UPDT] Timedout waiting for NTP response");
-                        }
-                    }
-                    else
-                    {
-                        Serial.println("[UPDT] WiFi has disconnected");
-                    }
+            rtn = true;
+        }
+        else
+        {
+            Serial.println("[UPDT] Timedout waiting for NTP response");
+        }
+    }
+    else
+    {
+        Serial.println("[UPDT] WiFi has disconnected");
+    }
 
     return rtn;
 }
@@ -596,20 +694,45 @@ void startWebserver()
     httpServer.begin();
 }
 #endif
-               
+
+void wifiConnected()
+{
+    char rssiStr[16];
+
+    sprintf(rssiStr, "%d dBm", WiFi.RSSI());
+    
+    Serial.print(" - WiFi connected (ch ");
+    Serial.print(WiFi.channel());
+    Serial.print(", rssi ");
+    Serial.print(rssiStr);
+    Serial.print(", ip address ");
+    Serial.print(WiFi.localIP());
+    Serial.println(")");
+
+#ifdef __MK1_HW
+    digitalWrite(LED_BUILTIN, HIGH);
+#else
+    neopixelWrite(PIN_NEOPIXEL, RGB_OFF, RGB_VAL, RGB_OFF);
+#endif
+}
+              
 void setup()
 {
     // Serial port
     Serial.begin(9600);
 
 #ifdef __MK2_HW
+
     // Disable I2C pullup resistors on ESP32 board
     pinMode(PIN_I2C_POWER, INPUT);
 
     Serial.println("12345678901234567890");
     initDelay();
+
 #else
+
     delay(5000);
+
 #endif
   
     Serial.println();
@@ -685,7 +808,7 @@ void setup()
         ledColData[3] = 0;
         ledColData[4] = 0;      
     }
-    
+
     // State machine
     clockState = STATE_INIT;
 
@@ -749,10 +872,16 @@ void loop()
             }
             else
             {
-                Serial.println(" - Timing mode");
+                Serial.println(" - Started timing mode");
 #endif
 
-                Serial.println(" - Connecting to WiFi network...");
+                Serial.print(" - Trying to connect WiFi to ssid '");
+                Serial.print(clockConfig.ssid);
+                Serial.print("' . ");
+#ifdef __MK2_HW
+                WiFi.setScanMethod(WIFI_ALL_CHANNEL_SCAN);
+                WiFi.setSortMethod(WIFI_CONNECT_AP_BY_SIGNAL);
+#endif
                 WiFi.begin(clockConfig.ssid, clockConfig.password);
 #ifdef __MK1_HW
                 ledState = LOW;
@@ -765,6 +894,7 @@ void loop()
                 syncLed(LOW);
                 clockState = STATE_CONNECTING;
                 reSyncCount++;
+                loggedIn = false;
 #ifdef __WITH_HTTP
             }
 #endif
@@ -774,20 +904,24 @@ void loop()
         case STATE_CONNECTING:
             if(WiFi.status() == WL_CONNECTED)
             {
+                Serial.println("ok");
+                
                 clockState = STATE_TIMING;
 
-                Serial.println(" - WiFi connected");
-                printWifiStatus();
-#ifdef __MK1_HW
-                digitalWrite(LED_BUILTIN, HIGH);
-#else
-                neopixelWrite(PIN_NEOPIXEL, RGB_OFF, RGB_VAL, RGB_OFF);
+                wifiConnected();
+                
+#ifdef __MK2_HW
+                initMDNS();
+                initArduinoOTA();
 #endif
+
                 ticks = 0;
                 startNtpClient();
+                
 #ifdef __WITH_TELNET
                 startTelnetServer();
 #endif
+
 #ifdef __WITH_HTTP
                 startWebserver();
 #endif
@@ -873,11 +1007,12 @@ void loop()
 #endif
 
 #ifdef __WITH_HTTP
+
             // If someone's connected to webserver, deal with it
             httpClient = httpServer.available();
             if(httpClient.connected())
             {
-                httpStatusGetRequest();
+                httpRequestHandler();
                 httpClient.flush();
                 httpClient.stop();
             }
@@ -916,4 +1051,10 @@ void loop()
         commandInterpretter();
         clockState = STATE_STOPPED;
     }
+
+#ifdef __WITH_OTA
+
+    ArduinoOTA.handle();
+
+#endif
 }

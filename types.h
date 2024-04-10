@@ -39,6 +39,7 @@ typedef struct
     char ssid[40];
     char password[70];
     char ntpServer[32];
+    char hostName[32];
     int syncUpdate;
     int initUpdate;
     int syncValid;
