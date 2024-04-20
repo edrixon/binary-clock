@@ -122,7 +122,7 @@ void IRAM_ATTR displayInterrupt()
 
     ledColSelect++;
     if(ledColSelect == MAX_COLS)
-    {
+    { 
         ledColSelect = 0;
     }
 
@@ -401,6 +401,7 @@ int splitTime(time_t epoch, timeNow_t *timeStruct)
 void ledShowTime(timeNow_t *timeStruct)
 {
     int tmpDisp[2];
+    int hourNow;
 
 #ifdef __MK2_HW
     int c;
@@ -417,19 +418,21 @@ void ledShowTime(timeNow_t *timeStruct)
 
 #endif
 
+        hourNow = timeStruct -> tm_hour;
+        
         // use tmpDisp to stop flickering NTP-sync and am/pm lights
-        if(digitalRead(PIN_MODESEL) == LOW && timeStruct -> tm_hour >= 12)
+        if(mode12() == true && hourNow >= 12)
         {
-            timeStruct -> tm_hour = timeStruct -> tm_hour - 12;
+            hourNow = hourNow - 12;
 
-            splitDigit(timeStruct -> tm_hour, &tmpDisp[0]);
+            splitDigit(hourNow, &tmpDisp[0]);
         
             // most significant hour bit is used to drive AM/PM indicator
             tmpDisp[0] = tmpDisp[0] | BIT_AMPM;
         }
         else
         {
-            splitDigit(timeStruct -> tm_hour, &tmpDisp[0]);
+            splitDigit(hourNow, &tmpDisp[0]);
         }
 
 #ifdef __MK2_HW
