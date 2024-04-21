@@ -12,6 +12,7 @@
 #define __WITH_TELNET            // To allow telnet connection for a status page
 #define __WITH_HTTP              // To enable configuration and status web pages
 #define __WITH_OTA               // To enable OTA updates with Arduino IDE
+#define __WITH_FTP               // To enable simple FTP server
 
 // Printed on serial port when board starts
 #define HELLO_STR      "** NTP clock by Ed Rixon, GD6XHG **"
@@ -55,11 +56,14 @@
 #define DEFAULT_PSWD   "scaramanga"
 #define DEFAULT_NTPS   "ubuntu.pool.ntp.org"
 #define DEFAULT_HOSTNAME "ntpclock"
+#define DEFAULT_FTPUSER "user"
+#define DEFAULT_FTPPSWD "secret"
 
 // Access point setup for configuration mode
 #define AP_SSID        "NTPClock"
 
-// Top bits of most significant hours are used for AM/PM
+
+// Top bit of most significant hours are used for AM/PM
 #define BIT_AMPM       0x08      // AM/PM
 
 #ifdef __MK1_HW

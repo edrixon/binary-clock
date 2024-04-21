@@ -18,8 +18,10 @@
 #include <FlashStorage.h>
 #else
 #include <WiFi.h>
+#include <FS.h>
 #include <FFat.h>
 #include <ESPmDNS.h>
+#include <SimpleFTPServer.h>
 #endif
 #include <WiFiUdp.h>
 #include <TimeLib.h>
@@ -46,6 +48,10 @@ FlashStorage(savedConfig, eepromData);
 #else
 
 hw_timer_t *timer0 = NULL;
+
+#ifdef __WITH_FTP
+FtpServer ftpSrv;
+#endif
 
 #endif
 
@@ -81,6 +87,8 @@ void defaultClockConfig()
     strcpy(clockConfig.password, DEFAULT_PSWD);
     strcpy(clockConfig.ntpServer, DEFAULT_NTPS);
     strcpy(clockConfig.hostName, DEFAULT_HOSTNAME);
+    strcpy(clockConfig.ftpUser, DEFAULT_FTPUSER);
+    strcpy(clockConfig.ftpPassword, DEFAULT_FTPPSWD);
     clockConfig.initUpdate = INIT_UPDATE;
     clockConfig.syncUpdate = SYNC_UPDATE;
     clockConfig.syncValid = SYNC_VALID;  
@@ -297,12 +305,11 @@ void initArduinoOTA()
         {
             type = "sketch";
         }
-        else // U_SPIFFS
+        else
         {
             type = "filesystem";
         }
 
-        // NOTE: if updating SPIFFS this would be the place to unmount SPIFFS using SPIFFS.end()
         FFat.end();
         Serial.println("Start updating " + type);
     })
@@ -355,6 +362,70 @@ void initArduinoOTA()
     });
 
     ArduinoOTA.begin();
+}
+
+#endif
+
+#ifdef __WITH_FTP
+
+void ftpSrvCallback(FtpOperation ftpOperation, unsigned int freeSpace, unsigned int totalSpace){
+  switch (ftpOperation) {
+    case FTP_CONNECT:
+      Serial.println(F("FTP: Connected!"));
+      break;
+    case FTP_DISCONNECT:
+      Serial.println(F("FTP: Disconnected!"));
+      break;
+    case FTP_FREE_SPACE_CHANGE:
+      Serial.printf("FTP: Free space change, free %u of %u!\n", freeSpace, totalSpace);
+      break;
+    default:
+      break;
+  }
+};
+
+void ftpSrvTransferCallback(FtpTransferOperation ftpOperation, const char* name, unsigned int transferredSize){
+  switch (ftpOperation) {
+    case FTP_UPLOAD_START:
+      Serial.println(F("FTP: Upload start!"));
+      break;
+    case FTP_UPLOAD:
+      Serial.printf("FTP: Upload of file %s byte %u\n", name, transferredSize);
+      break;
+    case FTP_TRANSFER_STOP:
+      Serial.println(F("FTP: Finish transfer!"));
+      break;
+    case FTP_TRANSFER_ERROR:
+      Serial.println(F("FTP: Transfer error!"));
+      break;
+    default:
+      break;
+  }
+
+  /* FTP_UPLOAD_START = 0,
+   * FTP_UPLOAD = 1,
+   *
+   * FTP_DOWNLOAD_START = 2,
+   * FTP_DOWNLOAD = 3,
+   *
+   * FTP_TRANSFER_STOP = 4,
+   * FTP_DOWNLOAD_STOP = 4,
+   * FTP_UPLOAD_STOP = 4,
+   *
+   * FTP_TRANSFER_ERROR = 5,
+   * FTP_DOWNLOAD_ERROR = 5,
+   * FTP_UPLOAD_ERROR = 5
+   */
+};
+
+void initFtpServer()
+{
+    Serial.println(" - FTP server");
+    
+    ftpSrv.setCallback(ftpSrvCallback);
+    ftpSrv.setTransferCallback(ftpSrvTransferCallback);
+
+    ftpSrv.begin(clockConfig.ftpUser, clockConfig.ftpPassword);
 }
 
 #endif
@@ -915,7 +986,12 @@ void loop()
                 
 #ifdef __MK2_HW
                 initMDNS();
+#ifdef __WITH_OTA
                 initArduinoOTA();
+#endif
+#ifdef __WITH_FTP
+                initFtpServer();
+#endif
 #endif
 
                 ticks = 0;
@@ -1054,6 +1130,10 @@ void loop()
         commandInterpretter();
         clockState = STATE_STOPPED;
     }
+
+#ifdef __WITH_FTP
+    ftpSrv.handleFTP();
+#endif
 
 #ifdef __WITH_OTA
 

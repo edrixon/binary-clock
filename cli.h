@@ -27,6 +27,8 @@ void cmdFormat();
 void cmdRename();
 void cmdHostname();
 void cmdTypeFile();
+void cmdFtpUsername();
+void cmdFtpPassword();
 #endif
 void cmdWebConfig();
 void cmdListCommands();

@@ -52,6 +52,8 @@ httpParamType httpParamHandlers[] =
     { "syncupdate", httpSetSyncUpdate },
     { "syncvalid", httpSetSyncValid },
     { "hostname", httpSetHostName },
+    { "ftpuser", httpSetFtpUsername },
+    { "ftppassword", httpSetFtpPassword },
     { NULL, NULL }
 };
 
@@ -130,6 +132,14 @@ void httpConfigPage()
     httpClient.print("<input type=\"text\" id=\"hostname\" name=\"hostname\" value=\"");
     httpClient.print(clockConfig.hostName);
     httpClient.println("\"><br><br>");
+    httpClient.println("<label for=\"ftpuser\">FTP server username:</label><br>");
+    httpClient.print("<input type=\"text\" id=\"ftpuser\" name=\"ftpuser\" value=\"");
+    httpClient.print(clockConfig.ftpUser);
+    httpClient.println("\"><br><br>");
+    httpClient.println("<label for=\"ftppassword\">FTP server password:</label><br>");
+    httpClient.print("<input type=\"text\" id=\"ftppassword\" name=\"ftppassword\" value=\"");
+    httpClient.print(clockConfig.ftpPassword);
+    httpClient.println("\"><br><br>");
     httpClient.println("<label for=\"ntpserver\">NTP server:</label><br>");
     httpClient.print("<input type=\"text\" id=\"ntpserver\" name=\"ntpserver\" value=\"");
     httpClient.print(clockConfig.ntpServer);
@@ -180,6 +190,16 @@ void httpSetSsid(char *ssid)
 void httpSetHostName(char *hostName)
 {
     strcpy(clockConfig.hostName, hostName); 
+}
+
+void httpSetFtpUsername(char *username)
+{
+    strcpy(clockConfig.ftpUser, username); 
+}
+
+void httpSetFtpPassword(char *password)
+{
+    strcpy(clockConfig.ftpPassword, password); 
 }
 
 void httpSetPassword(char *password)
@@ -677,7 +697,7 @@ void httpLedData()
         httpClient.print("|");
     }
 
-    if(mode12() == true)
+    if(mode12() == true && timeNow.tm_hour >= 12)
     {
         httpClient.print("green");
     }

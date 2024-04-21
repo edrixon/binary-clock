@@ -10,6 +10,8 @@ void httpSetSyncUpdate(char *syncUpdate);
 void httpSetInitUpdate(char *initUpdate);
 void httpSetSyncValid(char *syncValid);
 void httpSetHostName(char *hostName);
+void httpSetFtpUsername(char *username);
+void httpSetFtpPassword(char *password);
 void httpParseParam(char *paramName, char *paramValue);
 void httpSaveConfiguration();
 void httpNotFound();

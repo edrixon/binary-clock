@@ -35,6 +35,8 @@ cmdType cmdList[] =
     { "display",   cmdDisplay },
 #ifdef __MK2_HW
     { "format", cmdFormat },
+    { "ftpuser", cmdFtpUsername },
+    { "ftppassword", cmdFtpPassword },
     { "hd", cmdDump },
 #endif
     { "help",      cmdListCommands },
@@ -669,6 +671,30 @@ void cmdHostname()
     Serial.print(clockConfig.hostName);
     Serial.println("");
 }
+
+void cmdFtpUsername()
+{
+    if(paramPtr[0] != NULL)
+    {
+        strncpy(clockConfig.ftpUser, paramPtr[0], 32);
+    }
+
+    Serial.print("FTP username: ");
+    Serial.println(clockConfig.ftpUser);
+}
+
+
+void cmdFtpPassword()
+{
+    if(paramPtr[0] != NULL)
+    {
+        strncpy(clockConfig.ftpPassword, paramPtr[0], 32);
+    }
+
+    Serial.print("FTP password: ");
+    Serial.println(clockConfig.ftpPassword);
+}
+
 
 void cmdTypeFile()
 {
