@@ -14,6 +14,10 @@
 #define __WITH_OTA               // To enable OTA updates with Arduino IDE
 #define __WITH_FTP               // To enable simple FTP server
 
+// Software version information
+#define SW_VER         "1.01"
+#define SW_DATE        "April 2024"
+
 // Printed on serial port when board starts
 #define HELLO_STR      "** NTP clock by Ed Rixon, GD6XHG **"
 
@@ -62,6 +66,8 @@
 // Access point setup for configuration mode
 #define AP_SSID        "NTPClock"
 
+#define FW_UPDATE      "/update.txt"
+#define FW_REBOOT      "/reboot.txt"
 
 // Top bit of most significant hours are used for AM/PM
 #define BIT_AMPM       0x08      // AM/PM

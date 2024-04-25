@@ -655,6 +655,9 @@ void httpClockState()
     {
         httpClient.print("DISABLED");
     }
+    httpClient.print("|");
+
+    httpClient.printf("%ld|%s|%s", FFat.freeBytes(), SW_VER, SW_DATE);
 }
 
 void httpSplitLedData(int col)

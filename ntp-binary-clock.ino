@@ -371,13 +371,13 @@ void initArduinoOTA()
 void ftpSrvCallback(FtpOperation ftpOperation, unsigned int freeSpace, unsigned int totalSpace){
   switch (ftpOperation) {
     case FTP_CONNECT:
-      Serial.println(F("FTP: Connected!"));
+      Serial.println(F("[FTPd] Connected"));
       break;
     case FTP_DISCONNECT:
-      Serial.println(F("FTP: Disconnected!"));
+      Serial.println(F("[FTPd] Disconnected"));
       break;
     case FTP_FREE_SPACE_CHANGE:
-      Serial.printf("FTP: Free space change, free %u of %u!\n", freeSpace, totalSpace);
+      Serial.printf("[FTPd] Free space change, free %u of %u!\r\n", freeSpace, totalSpace);
       break;
     default:
       break;
@@ -387,16 +387,16 @@ void ftpSrvCallback(FtpOperation ftpOperation, unsigned int freeSpace, unsigned 
 void ftpSrvTransferCallback(FtpTransferOperation ftpOperation, const char* name, unsigned int transferredSize){
   switch (ftpOperation) {
     case FTP_UPLOAD_START:
-      Serial.println(F("FTP: Upload start!"));
+      Serial.println(F("[FTPd] Upload starting..."));
       break;
     case FTP_UPLOAD:
-      Serial.printf("FTP: Upload of file %s byte %u\n", name, transferredSize);
+      Serial.printf("[FTPd] Uploading %s - %u\r\n", name, transferredSize);
       break;
     case FTP_TRANSFER_STOP:
-      Serial.println(F("FTP: Finish transfer!"));
+      Serial.println(F("[FTPd] Transfeer completed"));
       break;
     case FTP_TRANSFER_ERROR:
-      Serial.println(F("FTP: Transfer error!"));
+      Serial.println(F("[FTPd] Transfer error"));
       break;
     default:
       break;
@@ -429,6 +429,112 @@ void initFtpServer()
 }
 
 #endif
+
+void createReboot()
+{
+    File fp;
+    unsigned char someStuff[10];
+
+    fp = FFat.open(FW_REBOOT, FILE_WRITE);
+    if(fp)
+    {
+        fp.write(someStuff, sizeof(someStuff));
+        fp.close();
+    }
+}
+
+void checkReboot()
+{
+    File fp;
+
+    fp = FFat.open(FW_REBOOT, FILE_READ);
+    if(fp)
+    {
+        fp.close();
+
+        FFat.remove(FW_REBOOT);
+
+        Serial.println("[REBT] Found reboot file");
+        delay(5);
+        Serial.println("[REBT] Rebooting...");
+        ESP.restart();
+    }
+}
+
+void checkFwUpdate()
+{
+    File fp;
+    unsigned char fwName[64];
+    unsigned char rdBuff[4096];
+    unsigned int readed;
+    boolean updateError;
+    int c;
+
+    fp = FFat.open(FW_UPDATE, FILE_READ);
+    if(!fp)
+    {
+        Serial.println(" - no firmware update required");
+        return;
+    }
+
+    for(c = 0; c < sizeof(fwName); c++)
+    {
+        fwName[c] = 0;
+    }
+    fp.read(fwName, sizeof(fwName));
+    fp.close();
+
+    fp = FFat.open((const char *)fwName, FILE_READ);
+    if(!fp)
+    {
+        Serial.printf(" - can't open firmware file %s\r\n", (char *)fwName);
+        return;
+    }
+
+    sendMorseChar(0);
+    Serial.printf(" - starting firmware update using %s\r\n", (char *)fwName);
+
+    updateError = true;
+    if(!Update.begin(UPDATE_SIZE_UNKNOWN))
+    {
+        Update.printError(Serial);
+    }
+    else
+    {
+        updateError = false;
+        do
+        {
+            readed = fp.read((unsigned char *)rdBuff, sizeof(rdBuff));
+            if(Update.write(rdBuff, readed) != readed)
+            {
+                Update.printError(Serial);
+                updateError = true;
+            }
+        }
+        while(readed == sizeof(rdBuff) && updateError == false);
+    }
+    fp.close();
+
+    if(updateError == false)
+    {
+        FFat.remove(FW_UPDATE);
+        FFat.remove((char *)fwName);
+        delay(5);
+
+        if(Update.end(true))
+        {
+            sendMorseChar(5);
+            Serial.println(" - firmware update completed");
+            delay(5);
+            Serial.println(" - rebooting....");
+            ESP.restart();
+        }
+        else
+        {
+            Update.printError(Serial);
+        }
+    }    
+}
 
 #endif
 
@@ -812,12 +918,17 @@ void setup()
     Serial.println();
     Serial.println(HELLO_STR);
     Serial.println("");
-    Serial.print("Software built for ");
+    Serial.print("Software version ");
+    Serial.print(SW_VER);
+    Serial.print(", ");
+    Serial.println(SW_DATE);
+    Serial.print("Compiled for ");
 #ifdef __MK1_HW
     Serial.println("MK1 hardware (MKR1000)");
 #else
     Serial.println("MK2 hardware (Adafruit ESP32-S3)");
     Serial.printf("ESP32 Chip model %s, revision %d, %d cores\r\n", ESP.getChipModel(), ESP.getChipRevision(), ESP.getChipCores());
+    Serial.printf("With %ld bytes of FLASH\r\n", ESP.getFlashChipSize());
     
     if(!FFat.begin(true))
     {
@@ -911,6 +1022,8 @@ void setup()
     }
 
 #endif
+
+    checkFwUpdate();
 
     Serial.println("*******************");
     Serial.println("***  R E A D Y  ***");
@@ -1130,6 +1243,8 @@ void loop()
         commandInterpretter();
         clockState = STATE_STOPPED;
     }
+
+    checkReboot();
 
 #ifdef __WITH_FTP
     ftpSrv.handleFTP();

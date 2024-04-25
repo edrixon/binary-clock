@@ -492,7 +492,7 @@ void cmdCopy()
     }
     else
     {
-        fp1 = FFat.open(paramPtr[0]);
+        fp1 = FFat.open(paramPtr[0], FILE_READ);
         if(fp1)
         {
             fp2 = FFat.open(paramPtr[1], FILE_WRITE);
@@ -548,7 +548,7 @@ void cmdDump()
     int readed;
     int c;
 
-    fp = FFat.open(paramPtr[0]);
+    fp = FFat.open(paramPtr[0], FILE_READ);
     if(fp)
     {
         offset = 0;
@@ -703,7 +703,7 @@ void cmdTypeFile()
     int readed;
     int c;
 
-    fp = FFat.open(paramPtr[0]);
+    fp = FFat.open(paramPtr[0], FILE_READ);
     if(fp)
     {
         do
