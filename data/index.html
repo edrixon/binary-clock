@@ -75,6 +75,8 @@
           document.getElementById('resyncs').innerHTML = tmpArray[4];
           document.getElementById('syncstate').innerHTML = tmpArray[5];
           document.getElementById('chimes').innerHTML = tmpArray[6];
+          document.getElementById('swver').innerHTML = tmpArray[8];
+          document.getElementById('swdate').innerHTML = tmpArray[9];
         }
       }
       ajaxRequest.send();
@@ -198,7 +200,7 @@
   </div>
   
   <div class="content footer">
-    <p>Software version 1.01, Ed Rixon GD6XHG, April 2024</p>
+    <p>Software version <span id='swver'>?.??</span>, Ed Rixon GD6XHG, <span id='swdate'>??????</span></p>
   </div>
     
 </body>
