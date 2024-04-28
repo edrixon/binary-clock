@@ -2,6 +2,9 @@
 #include <WiFi101.h>
 #else
 #include <WiFi.h>
+#ifdef __WITH_TELNET_CLI
+#include <ESPTelnet.h>
+#endif
 #endif
 
 #ifdef __IN_MAIN
@@ -36,6 +39,14 @@ WiFiServer httpServer(HTTP_PORT);
 WiFiClient httpClient;
 #endif
 
+#ifdef __WITH_TELNET
+WiFiClient telnetClient;
+#endif
+
+#ifdef __WITH_TELNET_CLI
+ESPTelnet telnet;
+#endif
+
 unsigned char reachability;
 int reSyncCount;       // re-sync's since midnight
 
@@ -46,6 +57,7 @@ long ticks;
 volatile unsigned long int interruptCount;
 
 boolean loggedIn;
+boolean newTelnetConnection;
 
 #else
 
@@ -60,6 +72,10 @@ extern int ledColData[];
 extern int ledRowPins[];
 extern WiFiServer httpServer;
 extern WiFiClient httpClient;
+extern WiFiClient telnetClient;
+#ifdef __WITH_TELNET_CLI
+extern ESPTelnet telnet;
+#endif
 extern int updateTime;
 extern int reSyncCount;
 extern unsigned char reachability;
@@ -69,6 +85,7 @@ extern long ticks;
 extern char *dayStrings[];
 extern int ntpSyncState;
 extern boolean loggedIn;
+extern boolean newTelnetConnection;
 
 #endif
 

@@ -1,9 +1,5 @@
-boolean chimesEnabled();
-boolean mode12();
-void binToStr(int bin, char *str);
-void splitDigit(int x, volatile int *digPtr);
 void printWifiStatus();
-void serialShowTime(timeNow_t *timeStruct, char *timeName);
+void telnetReadline();
 void serialReadline();
 void cmdSaveConfig();
 void cmdClearConfig();
@@ -16,6 +12,8 @@ void cmdShowState();
 void cmdInitUpdate();
 void cmdSyncUpdate();
 void cmdSyncValid();
+void cmdShowVersion();
+void cmdShowTime();
 #ifdef __MK1_HW
 void cmdWiFiVersion();
 #else
@@ -29,6 +27,7 @@ void cmdHostname();
 void cmdTypeFile();
 void cmdFtpUsername();
 void cmdFtpPassword();
+void cmdReboot();
 #endif
 void cmdWebConfig();
 void cmdListCommands();

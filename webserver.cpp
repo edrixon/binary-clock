@@ -10,7 +10,7 @@
 #include "types.h"
 
 #include "globals.h"
-#include "cli.h"
+#include "util.h"
 
 #ifdef __WITH_HTTP
 

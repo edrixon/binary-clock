@@ -9,14 +9,15 @@
                                  
 //#define __TEST_DISPLAY          // Just do display test and nothing else...
 #define __USE_DEFAULTS           // Load default configuration if nothing else already stored.  Otherwise, boot to CLI for user configuration
-#define __WITH_TELNET            // To allow telnet connection for a status page
+//#define __WITH_TELNET            // To allow telnet connection for a status page - no more than one _TELNET #define at once!!
+#define __WITH_TELNET_CLI        // To allow telnet connection for CLI instead of serial port  
 #define __WITH_HTTP              // To enable configuration and status web pages
 #define __WITH_OTA               // To enable OTA updates with Arduino IDE
 #define __WITH_FTP               // To enable simple FTP server
 
 // Software version information
 #define SW_VER         "1.01"
-#define SW_DATE        "April 2024"
+#define SW_DATE        "May 2024"
 
 // Printed on serial port when board starts
 #define HELLO_STR      "** NTP clock by Ed Rixon, GD6XHG **"
@@ -33,9 +34,7 @@
 
 #define TICKTIME       1000      // ms tick time for normal operation of state machine
 
-#ifdef __WITH_TELNET
 #define TELNET_PORT    23        // Port for telnet server to listen on
-#endif
 
 #ifdef __WITH_HTTP
 #define HTTP_PORT      80        // Port for webserver to listen on
@@ -66,8 +65,16 @@
 // Access point setup for configuration mode
 #define AP_SSID        "NTPClock"
 
+// Filenames used during updates
 #define FW_UPDATE      "/update.txt"
 #define FW_REBOOT      "/reboot.txt"
+
+// ASCII characters for CLI/telnet
+#define NUL            0x00
+#define BS             0x08
+#define CR             0x0d
+#define LF             0x0a
+#define DEL            0x7f
 
 // Top bit of most significant hours are used for AM/PM
 #define BIT_AMPM       0x08      // AM/PM

@@ -3,7 +3,9 @@
 //    uses multiplexed LED display directly connected to GPIO lines
 //    Time (12h/24h mode) or date can be displayed using BCD
 //    keeps time using Network Time Protocol (NTP) over WiFi
-//    WiFi configuration by built-in wireless access point and web interface or serial port
+//    WiFi configuration by built-in wireless access point and web interface
+//    Command line interface using telnet for configuration and status
+//    Over-the-air update using ArduinoODA from IDE or FTP
 //    Can send time in morse code and have an hourly morse chime
 //    Some things can be set at compile time in config.h
 //    User configuration done by putting clock into configuration mode which starts an access point and a webserver
@@ -22,6 +24,9 @@
 #include <FFat.h>
 #include <ESPmDNS.h>
 #include <SimpleFTPServer.h>
+#ifdef __WITH_TELNET_CLI
+#include <ESPTelnet.h>
+#endif
 #endif
 #include <WiFiUdp.h>
 #include <TimeLib.h>
@@ -39,6 +44,7 @@
 #include "cli.h"
 #include "globals.h"
 #include "morse.h"
+#include "util.h"
 
 #ifdef __MK1_HW
 
@@ -223,7 +229,7 @@ boolean getClockConfig()
         fp.close();
     }
   
-    if(clockConfig.eepromValid == EEPROM_VALID)
+    if(clockConfig.eepromValid == EEPROM_VALID && clockConfig.ssid[0] != '\0')
     {
         return true;
     }
@@ -280,7 +286,7 @@ void initMDNS()
 {
     if(MDNS.begin(clockConfig.hostName))
     {
-        Serial.printf(" - mDNS responder (%s)\r\n", clockConfig.hostName);
+        Serial.printf(" - mDNS responder (hostname %s)\r\n", clockConfig.hostName);
     }
     else
     {
@@ -292,7 +298,7 @@ void initMDNS()
 
 void initArduinoOTA()
 {
-    Serial.printf(" - ArduinoOTA (%s, port %d)\r\n", clockConfig.hostName, OTA_PORT);
+    Serial.printf(" - ArduinoOTA (port %d)\r\n", OTA_PORT);
   
     ArduinoOTA.setHostname(clockConfig.hostName);
     ArduinoOTA.setPort(OTA_PORT);
@@ -477,10 +483,7 @@ void checkFwUpdate()
         return;
     }
 
-    for(c = 0; c < sizeof(fwName); c++)
-    {
-        fwName[c] = 0;
-    }
+    memset((void *)fwName, 0, sizeof(fwName));
     fp.read(fwName, sizeof(fwName));
     fp.close();
 
@@ -537,6 +540,30 @@ void checkFwUpdate()
 }
 
 #endif
+
+void serialShowTime(timeNow_t *timeStruct, char *timeName)
+{
+    int screen;
+    int digit;
+    char timeString[30];
+
+    if(ntpSyncState == HIGH)
+    {
+        Serial.print("[SYNC] ");
+    }
+    else
+    {
+        Serial.print("[INIT] ");
+    }
+
+    sprintf(timeString, "%d-%d   %s %02d/%02d/%02d", reSyncCount, ticks, dayStrings[timeStruct -> tm_wday], timeStruct -> tm_mday, timeStruct -> tm_mon, timeStruct -> tm_year);
+    Serial.print(timeString);
+                  
+    Serial.print(" - ");
+
+    sprintf(timeString, "%02d:%02d:%02d %s", timeStruct -> tm_hour, timeStruct -> tm_min, timeStruct -> tm_sec, timeName);
+    Serial.println(timeString);    
+}
 
 // Initialise display
 void initDisplay()
@@ -849,19 +876,28 @@ void hourlyChime()
 
 void startNtpClient()
 {
-    Serial.print(" - NTP client started with server ");
-    Serial.println(clockConfig.ntpServer);
+    Serial.print(" - NTP client started (server ");
+    Serial.print(clockConfig.ntpServer);
+    Serial.println(")");
     timeClient.setPoolServerName(clockConfig.ntpServer);
     timeClient.begin(NTP_PORT);
     updateTime = clockConfig.initUpdate;
     ntpUpdates = 0;
 }
 
+#ifdef __WITH_TELNET_CLI
+void startTelnetServer()
+{
+    initTelnetServer();
+}
+#endif
+
 #ifdef __WITH_TELNET
 void startTelnetServer()
 {
-    Serial.print(" - Telnet server started, listening on port ");
-    Serial.println(TELNET_PORT);
+    Serial.print(" - Telnet server started (port ");
+    Serial.print(TELNET_PORT);
+    Serial.println(")");
     telnetServer.begin();
 }
 #endif
@@ -869,8 +905,9 @@ void startTelnetServer()
 #ifdef __WITH_HTTP
 void startWebserver()
 {
-    Serial.print(" - Webserver started, listening on port ");
-    Serial.println(HTTP_PORT);
+    Serial.print(" - Webserver started (port ");
+    Serial.print(HTTP_PORT);
+    Serial.println(")");
     httpServer.begin();
 }
 #endif
@@ -985,7 +1022,12 @@ void setup()
               
         Serial.println("No configuration found in FLASH!!");
 
+#ifdef __WITH_TELNET_CLI
+        while(1);
+#else
         commandInterpretter();
+#endif
+        
 
         ledColData[0] = 0;
         ledColData[1] = 0;
@@ -1034,10 +1076,6 @@ void setup()
 
 void loop()
 {
-#ifdef __WITH_TELNET
-    WiFiClient telnetClient;
-#endif
-
     switch(clockState)
     {
         case STATE_INIT:
@@ -1106,13 +1144,16 @@ void loop()
                 initFtpServer();
 #endif
 #endif
+#ifdef __WITH_TELNET_CLI
+                startTelnetServer();
+#endif
+#ifdef __WITH_TELNET
+                startTelnetServer();
+#endif
 
                 ticks = 0;
                 startNtpClient();
                 
-#ifdef __WITH_TELNET
-                startTelnetServer();
-#endif
 
 #ifdef __WITH_HTTP
                 startWebserver();
@@ -1219,6 +1260,9 @@ void loop()
 #ifdef __WITH_TELNET
             telnetServer.end();
 #endif
+#ifdef __WITH_TELNET_CLI
+            telnet.stop();
+#endif
 #ifdef __WITH_HTTP
             httpServer.end();
 #endif
@@ -1235,6 +1279,15 @@ void loop()
             clockState = STATE_STOPPED;
     }
 
+#ifdef __WITH_TELNET_CLI
+    telnet.loop();
+    if(newTelnetConnection == true)
+    {
+        newTelnetConnection = false;
+        commandInterpretter();
+        clockState = STATE_STOPPED;
+    }
+#else
     // If someone's plugged the serial cable in and pressed a key
     // Enter CLI
     // Restart state machine when exiting CLI
@@ -1243,6 +1296,7 @@ void loop()
         commandInterpretter();
         clockState = STATE_STOPPED;
     }
+#endif
 
     checkReboot();
 

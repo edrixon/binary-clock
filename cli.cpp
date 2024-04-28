@@ -11,17 +11,22 @@
 
 #ifdef __MK2_HW
 #include <FFat.h>
+#ifdef __WITH_TELNET_CLI
+#include <ESPTelnet.h>
+#endif
 #endif
 
 #include "types.h"
 #include "cli.h"
 #include "globals.h"
 #include "webserver.h"
+#include "util.h"
 
-#define BS  0x08
-#define CR  0x0d
-#define LF  0x0a
-#define DEL 0x7f
+#ifdef __WITH_TELNET_CLI
+#define CLI_DEV telnet
+#else
+#define CLI_DEV Serial
+#endif
 
 cmdType cmdList[] =
 {
@@ -52,6 +57,7 @@ cmdType cmdList[] =
     { "ntpserver", cmdNtpServer },
     { "password",  cmdPassword },
 #ifdef __MK2_HW
+    { "reboot", cmdReboot },
     { "rm", cmdDelete },
 #endif
     { "save",      cmdSaveConfig },
@@ -59,6 +65,8 @@ cmdType cmdList[] =
     { "ssid",      cmdSsid },
     { "syncupdate", cmdSyncUpdate },
     { "syncvalid", cmdSyncValid },
+    { "time", cmdShowTime },
+    { "ver", cmdShowVersion },
 #ifdef __WITH_HTTP
     { "webconfig", cmdWebConfig },
 #endif
@@ -68,62 +76,6 @@ cmdType cmdList[] =
     { "?",         cmdListCommands },
     { NULL,        NULL }
 };
-
-// true if in 12 hour mode
-boolean mode12()
-{
-    if(digitalRead(PIN_MODESEL) == LOW)
-    {
-        return true;
-    }
-    else
-    {
-        return false;
-    }
-}
-
-// true if hourly chimes required
-boolean chimesEnabled()
-{
-    if(digitalRead(PIN_CHIME) == LOW)
-    {
-        return true;
-    }
-    else
-    {
-        return false;
-    }
-}
-
-// Convert a number to binary in ASCII
-void binToStr(int bin, char *str)
-{
-    int c;
-
-    for(c = 0; c < 8; c++)
-    {
-        if((bin & 0x80) == 0x80)
-        {
-            *str = '1';
-        }
-        else
-        {
-            *str = '0';
-        }
-
-        str++;
-        bin = bin << 1;
-    }
-
-    *str = '\0';
-}
-
-void splitDigit(int x, volatile int *digPtr)
-{
-    *digPtr = (x / 10);
-    digPtr++;
-    *digPtr = (x % 10);
-}
 
 void printWifiStatus()
 {
@@ -135,7 +87,7 @@ void printWifiStatus()
   
     if(WiFi.status() != WL_CONNECTED)
     {
-        Serial.println("Wifi disconnected");
+        CLI_DEV.println("Wifi disconnected");
     }
     else
     {
@@ -144,42 +96,20 @@ void printWifiStatus()
         gway = WiFi.gatewayIP();
         rssi = WiFi.RSSI();
 
-        Serial.print("Wifi connected to ");
-        Serial.println(clockConfig.ssid);
+        CLI_DEV.print("Wifi connected to ");
+        CLI_DEV.println(clockConfig.ssid);
         sprintf(wifiStr, "  RSSI      : %d dBm", rssi);
-        Serial.println(wifiStr);
-        Serial.print("  IP        : ");
-        Serial.println(ip);
-        Serial.print("  Netmask   : ");
-        Serial.println(mask);
-        Serial.print("  Gateway   : ");
-        Serial.println(gway);
+        CLI_DEV.println(wifiStr);
+        CLI_DEV.print("  IP        : ");
+        CLI_DEV.println(ip);
+        CLI_DEV.print("  Netmask   : ");
+        CLI_DEV.println(mask);
+        CLI_DEV.print("  Gateway   : ");
+        CLI_DEV.println(gway);
     }
 }
 
-void serialShowTime(timeNow_t *timeStruct, char *timeName)
-{
-    int screen;
-    int digit;
-    char timeString[30];
-
-    if(ntpSyncState == HIGH)
-    {
-        Serial.print("[SYNC] ");
-    }
-    else
-    {
-        Serial.print("[INIT] ");
-    }
-
-    sprintf(timeString, "%d-%d   %s %02d/%02d/%02d", reSyncCount, ticks, dayStrings[timeStruct -> tm_wday], timeStruct -> tm_mday, timeStruct -> tm_mon, timeStruct -> tm_year);
-    Serial.print(timeString);
-                  
-    Serial.print(" - ");
-
-    sprintf(timeString, "%02d:%02d:%02d %s", timeStruct -> tm_hour, timeStruct -> tm_min, timeStruct -> tm_sec, timeName);
-    Serial.println(timeString);    
-}
+#ifndef __WITH_TELNET_CLI
 
 // Read a line from serial port up to '\n' character
 // seperate command and parameter into two strings by replacing space with '\0'
@@ -248,23 +178,38 @@ void serialReadline()
     while(c < SERBUFF_LEN && eoln == false && paramCount < MAX_PARAMS);
 }
 
+#endif
+
+void cmdShowTime()
+{
+    char timeString[80];
+    
+    sprintf(timeString, "%s %02d/%02d/%02d", dayStrings[timeNow.tm_wday], timeNow.tm_mday, timeNow.tm_mon, timeNow.tm_year);
+    CLI_DEV.print(timeString);
+                  
+    CLI_DEV.print(" - ");
+
+    sprintf(timeString, "%02d:%02d:%02d", timeNow.tm_hour, timeNow.tm_min, timeNow.tm_sec);
+    CLI_DEV.println(timeString);    
+}
+
 void cmdSaveConfig()
 {
     saveClockConfig();
-    Serial.println("Running configuration saved");
+    CLI_DEV.println("Running configuration saved");
 }
 
 void cmdClearConfig()
 {
     memset(&clockConfig, 0, sizeof(clockConfig));
 
-    Serial.println("Running configuration erased");
+    CLI_DEV.println("Running configuration erased");
 }
 
 void cmdGetConfig()
 {
     getClockConfig();
-    Serial.println("Loaded saved configuration");
+    CLI_DEV.println("Loaded saved configuration");
 }
 
 void cmdSsid()
@@ -274,9 +219,9 @@ void cmdSsid()
          strncpy(clockConfig.ssid, paramPtr[0], 40);
     }
 
-    Serial.print("SSID: ");
-    Serial.print(clockConfig.ssid);
-    Serial.println("");
+    CLI_DEV.print("SSID: ");
+    CLI_DEV.print(clockConfig.ssid);
+    CLI_DEV.println("");
 }
 
 void cmdDisplay()
@@ -286,13 +231,13 @@ void cmdDisplay()
     
     if(paramPtr[0] == NULL)
     {
-        Serial.println("display <six lowercase hex digits without spaces>");
+        CLI_DEV.println("display <six lowercase hex digits without spaces>");
     }
     else
     {
         if(strlen(paramPtr[0]) != 6)
         {
-            Serial.println("Need 6 digits");
+            CLI_DEV.println("Need 6 digits");
         }
         else
         {
@@ -320,9 +265,9 @@ void cmdPassword()
         strncpy(clockConfig.password, paramPtr[0], 64);
     }
 
-    Serial.print("Password: ");
-    Serial.print(clockConfig.password);
-    Serial.println("");
+    CLI_DEV.print("Password: ");
+    CLI_DEV.print(clockConfig.password);
+    CLI_DEV.println("");
 }
 
 void cmdNtpServer()
@@ -332,9 +277,9 @@ void cmdNtpServer()
          strncpy(clockConfig.ntpServer, paramPtr[0], 32);
     }
 
-    Serial.print("NTP server: ");
-    Serial.print(clockConfig.ntpServer);
-    Serial.println("");
+    CLI_DEV.print("NTP server: ");
+    CLI_DEV.print(clockConfig.ntpServer);
+    CLI_DEV.println("");
 }
 
 void cmdShowState()
@@ -343,68 +288,68 @@ void cmdShowState()
     
     printWifiStatus();
 
-    Serial.println("Running configuration");
-    Serial.print("  SSID             : ");
-    Serial.println(clockConfig.ssid);
-    Serial.print("  Password         : ");
-    Serial.println(clockConfig.password);
-    Serial.print("  NTP server       : ");
-    Serial.println(clockConfig.ntpServer);
-    Serial.print("  Clock hostname   : ");
-    Serial.println(clockConfig.hostName);
-    Serial.print("  Updates for sync : ");
-    Serial.println(clockConfig.syncValid);
-    Serial.print("  Initial update   : ");
-    Serial.print(clockConfig.initUpdate);
-    Serial.println(" seconds");
-    Serial.print("  Update period    : ");
-    Serial.print(clockConfig.syncUpdate);
-    Serial.println(" seconds");
+    CLI_DEV.println("Running configuration");
+    CLI_DEV.print("  SSID             : ");
+    CLI_DEV.println(clockConfig.ssid);
+    CLI_DEV.print("  Password         : ");
+    CLI_DEV.println(clockConfig.password);
+    CLI_DEV.print("  NTP server       : ");
+    CLI_DEV.println(clockConfig.ntpServer);
+    CLI_DEV.print("  Clock hostname   : ");
+    CLI_DEV.println(clockConfig.hostName);
+    CLI_DEV.print("  Updates for sync : ");
+    CLI_DEV.println(clockConfig.syncValid);
+    CLI_DEV.print("  Initial update   : ");
+    CLI_DEV.print(clockConfig.initUpdate);
+    CLI_DEV.println(" seconds");
+    CLI_DEV.print("  Update period    : ");
+    CLI_DEV.print(clockConfig.syncUpdate);
+    CLI_DEV.println(" seconds");
         
-    Serial.println("");
+    CLI_DEV.println("");
     
-    Serial.print("Interrupt count: ");
-    Serial.print(interruptCount);
-    Serial.println("");
+    CLI_DEV.print("Interrupt count: ");
+    CLI_DEV.print(interruptCount);
+    CLI_DEV.println("");
 
     sprintf(tmpStr, "Reachability: 0x%02x (0b", reachability);
-    Serial.print(tmpStr);
+    CLI_DEV.print(tmpStr);
     binToStr(reachability, tmpStr);
-    Serial.print(tmpStr);
-    Serial.println(")");
+    CLI_DEV.print(tmpStr);
+    CLI_DEV.println(")");
 
-    Serial.print("Resync count: ");
-    Serial.print(reSyncCount);
-    Serial.println(" today");
+    CLI_DEV.print("Resync count: ");
+    CLI_DEV.print(reSyncCount);
+    CLI_DEV.println(" today");
 
-    Serial.print("Mode: ");
+    CLI_DEV.print("Mode: ");
     if(mode12() == true)
     {
-        Serial.println("12 hour");
+        CLI_DEV.println("12 hour");
     }
     else
     {
-        Serial.println("24 hour");
+        CLI_DEV.println("24 hour");
     }
     
-    Serial.print("Display: ");
+    CLI_DEV.print("Display: ");
     if(digitalRead(PIN_DATETIME) == LOW)
     {
-        Serial.println("Date");
+        CLI_DEV.println("Date");
     }
     else
     {
-        Serial.println("Time");
+        CLI_DEV.println("Time");
     }
 
-    Serial.print("Hourly chimes: ");
+    CLI_DEV.print("Hourly chimes: ");
     if(chimesEnabled() == true)
     {
-        Serial.println("Enabled");
+        CLI_DEV.println("Enabled");
     }
     else
     {
-        Serial.println("Disabled");
+        CLI_DEV.println("Disabled");
     }
 
 }
@@ -416,9 +361,9 @@ void cmdInitUpdate()
         clockConfig.initUpdate = atoi(paramPtr[0]);
     }
 
-    Serial.print("Initial update period: ");
-    Serial.print(clockConfig.initUpdate);
-    Serial.println(" seconds");
+    CLI_DEV.print("Initial update period: ");
+    CLI_DEV.print(clockConfig.initUpdate);
+    CLI_DEV.println(" seconds");
 }
 
 void cmdSyncUpdate()
@@ -428,9 +373,9 @@ void cmdSyncUpdate()
         clockConfig.syncUpdate = atoi(paramPtr[0]);
     }
 
-    Serial.print("Update period once sync'ed: ");
-    Serial.print(clockConfig.syncUpdate);
-    Serial.println(" seconds");
+    CLI_DEV.print("Update period once sync'ed: ");
+    CLI_DEV.print(clockConfig.syncUpdate);
+    CLI_DEV.println(" seconds");
 }
 
 void cmdSyncValid()
@@ -440,8 +385,13 @@ void cmdSyncValid()
         clockConfig.syncValid = atoi(paramPtr[0]);
     }
 
-    Serial.print("Sync's required before time valid: ");
-    Serial.println(clockConfig.syncValid);
+    CLI_DEV.print("Sync's required before time valid: ");
+    CLI_DEV.println(clockConfig.syncValid);
+}
+
+void cmdShowVersion()
+{
+    CLI_DEV.printf("Software version %s, %s\r\n", SW_VER, SW_DATE);
 }
 
 #ifdef __MK1_HW
@@ -462,22 +412,28 @@ void cmdWiFiVersion()
         latestFw = WIFI_FIRMWARE_LATEST_MODEL_A;
     }
 
-    Serial.print("Latest firmware: ");
-    Serial.println(latestFw);
+    CLI_DEV.print("Latest firmware: ");
+    CLI_DEV.println(latestFw);
 
-    Serial.print("Current verstion: ");
-    Serial.print(fv);
+    CLI_DEV.print("Current verstion: ");
+    CLI_DEV.print(fv);
     if(fv >= latestFw)
     {
-        Serial.println(" (OK)");
+        CLI_DEV.println(" (OK)");
     }
     else
     {
-        Serial.println(" (REQUIRES UPDATE)");
+        CLI_DEV.println(" (REQUIRES UPDATE)");
     }
 }
 
 #else
+
+void cmdReboot()
+{
+    CLI_DEV.printf("Rebooting...\r\n");
+    ESP.restart();
+}
 
 void cmdCopy()
 {
@@ -488,54 +444,53 @@ void cmdCopy()
 
     if(paramCount != 2)
     {
-        Serial.printf("cp <filename> <new filename>\r\n");
+        CLI_DEV.printf("cp <filename> <new filename>\r\n");
+        return;
     }
-    else
+
+    fp1 = FFat.open(paramPtr[0], FILE_READ);
+    if(fp1)
     {
-        fp1 = FFat.open(paramPtr[0], FILE_READ);
-        if(fp1)
+        fp2 = FFat.open(paramPtr[1], FILE_WRITE);
+        if(fp2)
         {
-            fp2 = FFat.open(paramPtr[1], FILE_WRITE);
-            if(fp2)
+            do
             {
-                do
-                {
-                    readed = fp1.read(cpBuff, 64);
-                    fp2.write(cpBuff, readed);
-                }
-                while(readed == 64);
-                fp2.close();
+                readed = fp1.read(cpBuff, 64);
+                fp2.write(cpBuff, readed);
             }
-            else
-            {
-                Serial.printf("Can't open %s for writing\r\n", paramPtr[1]);
-            }
-            fp1.close();
+            while(readed == 64);
+            fp2.close();
         }
         else
         {
-            Serial.printf("Can't open %s for reading\r\n", paramPtr[0]);
+            CLI_DEV.printf("Can't open %s for writing\r\n", paramPtr[1]);
         }
+        fp1.close();
+    }
+    else
+    {
+        CLI_DEV.printf("Can't open %s for reading\r\n", paramPtr[0]);
     }
     
-    Serial.printf("Copy %s to %s\r\n", paramPtr[0], paramPtr[1]);
+    CLI_DEV.printf("Copy %s to %s\r\n", paramPtr[0], paramPtr[1]);
 }
 
 void cmdDelete()
 {
     if(paramPtr[0] == NULL)
     {
-        Serial.println("rm <filename>");  
+        CLI_DEV.println("rm <filename>");  
     }
     else
     {
         if(FFat.remove(paramPtr[0]))
         {
-            Serial.printf("Deleted %s\r\n", paramPtr[0]);
+            CLI_DEV.printf("Deleted %s\r\n", paramPtr[0]);
         }
         else
         {
-            Serial.printf("Failed to delete %s\r\n", paramPtr[0]);
+            CLI_DEV.printf("Failed to delete %s\r\n", paramPtr[0]);
         }
     }
 }
@@ -548,6 +503,12 @@ void cmdDump()
     int readed;
     int c;
 
+    if(paramPtr[0] == NULL)
+    {
+        CLI_DEV.println("hd <filename>");
+        return;
+    }
+
     fp = FFat.open(paramPtr[0], FILE_READ);
     if(fp)
     {
@@ -556,24 +517,24 @@ void cmdDump()
         {
             readed = fp.read(dBuff, 16);
 
-            Serial.printf("%04x   ", offset);
+            CLI_DEV.printf("%04x   ", offset);
             for(c = 0; c < readed; c++)
             {
-                Serial.printf("%02x ", dBuff[c]);
+                CLI_DEV.printf("%02x ", dBuff[c]);
             }
-            Serial.print("   :");
+            CLI_DEV.print("   :");
             for(c = 0; c < readed; c++)
             {
                 if(isprint(dBuff[c]))
                 {
-                    Serial.printf("%c", dBuff[c]);
+                    CLI_DEV.printf("%c", dBuff[c]);
                 }
                 else
                 {
-                    Serial.print(".");
+                    CLI_DEV.print(".");
                 }
             }
-            Serial.println(":");
+            CLI_DEV.println(":");
             offset = offset + 16;
         }
         while(readed == 16);
@@ -581,7 +542,7 @@ void cmdDump()
     }
     else
     {
-        Serial.printf("Can't open %s for reading\r\n", paramPtr[0]);
+        CLI_DEV.printf("Can't open %s for reading\r\n", paramPtr[0]);
     }
 }
 
@@ -589,13 +550,13 @@ void cmdRename()
 {
     if(paramCount != 2)
     {
-        Serial.println("mv <filename> <new filename>");
+        CLI_DEV.println("mv <filename> <new filename>");
     }
     else
     {
         if(FFat.rename(paramPtr[0], paramPtr[1]))
         {
-            Serial.printf("Renamed %s to %s\r\n", paramPtr[0], paramPtr[1]);
+            CLI_DEV.printf("Renamed %s to %s\r\n", paramPtr[0], paramPtr[1]);
         }
     }
 }
@@ -605,16 +566,16 @@ void cmdFormat()
     FFat.end();
     if(FFat.format() == true)
     {
-        Serial.println("Filesystem formatted");
+        CLI_DEV.println("Filesystem formatted");
     }
     else
     {
-        Serial.println("Failed to format");
+        CLI_DEV.println("Failed to format");
     }
     
     if(FFat.begin() == true)
     {
-        Serial.println("Mounted filesystem");
+        CLI_DEV.println("Mounted filesystem");
     }
 }
 
@@ -626,20 +587,20 @@ void cmdDirectory()
 
     done = false;
     dir = FFat.open("/");
-    Serial.println("Directory listing of /");
+    CLI_DEV.println("Directory listing of /");
     do
     {
         entry = dir.openNextFile();
         if(entry)
         {
-            Serial.printf(" %s", entry.name());
+            CLI_DEV.printf(" %s", entry.name());
             if(entry.isDirectory())
             {
-                Serial.println("/");
+                CLI_DEV.println("/");
             }
             else
             {
-                Serial.printf("\t\t%d\r\n", entry.size());
+                CLI_DEV.printf("\t\t%d\r\n", entry.size());
             }
 
             entry.close();
@@ -653,10 +614,10 @@ void cmdDirectory()
 
     dir.close();
 
-    Serial.println("");
-    Serial.printf("Used space %ld bytes\r\n", FFat.usedBytes());
-    Serial.printf("Total space %ld bytes\r\n", FFat.totalBytes());
-    Serial.printf("Free space %ld bytes\r\n", FFat.freeBytes());
+    CLI_DEV.println("");
+    CLI_DEV.printf("Used space %ld bytes\r\n", FFat.usedBytes());
+    CLI_DEV.printf("Total space %ld bytes\r\n", FFat.totalBytes());
+    CLI_DEV.printf("Free space %ld bytes\r\n", FFat.freeBytes());
 
 }
 
@@ -667,9 +628,9 @@ void cmdHostname()
          strncpy(clockConfig.hostName, paramPtr[0], 32);
     }
 
-    Serial.print("Hostname: ");
-    Serial.print(clockConfig.hostName);
-    Serial.println("");
+    CLI_DEV.print("Hostname: ");
+    CLI_DEV.print(clockConfig.hostName);
+    CLI_DEV.println("");
 }
 
 void cmdFtpUsername()
@@ -679,8 +640,8 @@ void cmdFtpUsername()
         strncpy(clockConfig.ftpUser, paramPtr[0], 32);
     }
 
-    Serial.print("FTP username: ");
-    Serial.println(clockConfig.ftpUser);
+    CLI_DEV.print("FTP username: ");
+    CLI_DEV.println(clockConfig.ftpUser);
 }
 
 
@@ -691,8 +652,8 @@ void cmdFtpPassword()
         strncpy(clockConfig.ftpPassword, paramPtr[0], 32);
     }
 
-    Serial.print("FTP password: ");
-    Serial.println(clockConfig.ftpPassword);
+    CLI_DEV.print("FTP password: ");
+    CLI_DEV.println(clockConfig.ftpPassword);
 }
 
 
@@ -712,16 +673,16 @@ void cmdTypeFile()
 
             for(c = 0; c < readed; c++)
             {
-                Serial.printf("%c", dBuff[c]);
+                CLI_DEV.printf("%c", dBuff[c]);
             }
         }
         while(readed == 16);
         fp.close();
-        Serial.println("");
+        CLI_DEV.println("");
     }
     else
     {
-        Serial.printf("Can't open %s for reading\r\n", paramPtr[0]);
+        CLI_DEV.printf("Can't open %s for reading\r\n", paramPtr[0]);
     }
 }
 
@@ -731,6 +692,8 @@ void cmdTypeFile()
 
 void cmdWebConfig()
 {
+    CLI_DEV.println("Entering web configuration mode...");
+    
     Serial.println(" - Stopping WiFi client");
 #ifdef __MK1_HW
     WiFi.end();
@@ -757,14 +720,14 @@ void cmdListCommands()
     c = 0;
     while(cmdList[c].cmdName != NULL)
     {
-        Serial.print(cmdList[c].cmdName);
-        Serial.println("");
+        CLI_DEV.print(cmdList[c].cmdName);
+        CLI_DEV.println("");
 
         c++;
     }
 
-    Serial.println("");
-    Serial.println("'exit' to finish");
+    CLI_DEV.println("");
+    CLI_DEV.println("'exit' to finish");
 }
 
 void commandInterpretter()
@@ -772,8 +735,8 @@ void commandInterpretter()
     int cmd;
     int done;
 
-    Serial.print(HELLO_STR);
-    Serial.println("");
+    CLI_DEV.print(HELLO_STR);
+    CLI_DEV.println("");
 
     // Something other than the time...
     ledColData[0] = 0;
@@ -786,8 +749,13 @@ void commandInterpretter()
     done = false;
     do
     {
-        Serial.print(CLI_PROMPT);
+        CLI_DEV.print(CLI_PROMPT);
+		
+#ifdef __WITH_TELNET_CLI
+        telnetReadline();
+#else
         serialReadline();
+#endif
  
         if(serialBuff[0] != '\0')
         {
@@ -805,7 +773,7 @@ void commandInterpretter()
   
                 if(cmdList[cmd].cmdName == NULL)
                 {
-                    Serial.println("Bad command");
+                    CLI_DEV.println("Bad command");
                 }
                 else
                 {
@@ -816,5 +784,8 @@ void commandInterpretter()
     }
     while(done == false);
 
-    Serial.println("CLI exit");
+    CLI_DEV.println("CLI exit");
+#ifdef __WITH_TELNET_CLI
+    telnet.disconnectClient();
+#endif
 }
