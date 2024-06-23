@@ -83,7 +83,7 @@ void telnetOnInputReceived(String str)
     int c;
     char *cPtr;
 
- 	  gotLine = true;
+    gotLine = true;
 
     paramCount = 0;
     for(c = 0; c < MAX_PARAMS; c++)
@@ -91,7 +91,7 @@ void telnetOnInputReceived(String str)
         paramPtr[c] = NULL;
     }
   
-	  // Copy str into serialBuffer[] and parameters into paramPtr[]
+    // Copy str into serialBuffer[] and parameters into paramPtr[]
     strcpy(telnetRxBuffer, str.c_str());
     telnetLoadSerialBuffer();
     
@@ -117,7 +117,7 @@ void telnetReadline()
 {
 	while(gotLine == false)
 	{
-		  telnet.loop();
+        telnet.loop();
 	}
 	
 	gotLine = false;

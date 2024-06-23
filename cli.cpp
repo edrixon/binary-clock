@@ -47,6 +47,7 @@ cmdType cmdList[] =
     { "help",      cmdListCommands },
 #ifdef __MK2_HW
     { "hostname",  cmdHostname },
+	{ "hw", cmdShowHardware },
 #endif
     { "initupdate", cmdInitUpdate },
     { "load",      cmdGetConfig },
@@ -428,6 +429,13 @@ void cmdWiFiVersion()
 }
 
 #else
+
+void cmdShowHardware()
+{
+    CLI_DEV.printf("MK2 hardware (Adafruit ESP32-S3)");
+    CLI_DEV.printf("ESP32 chip model %s, revision %d, %d cores\r\n", ESP.getChipModel(), ESP.getChipRevision(), ESP.getChipCores());
+    CLI_DEV.printf("With %ld bytes of FLASH\r\n", ESP.getFlashChipSize());
+}
 
 void cmdReboot()
 {

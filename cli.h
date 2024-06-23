@@ -17,6 +17,7 @@ void cmdShowTime();
 #ifdef __MK1_HW
 void cmdWiFiVersion();
 #else
+void cmdShowHardware();
 void cmdCopy();
 void cmdDelete();
 void cmdDirectory();
