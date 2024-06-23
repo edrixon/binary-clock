@@ -516,7 +516,7 @@ void httpBuiltinStatusPage()
     httpClient.println("  </tr>");
     httpClient.println("  <tr>");
     httpClient.println("    <th>Reachability</th>");
-    sprintf(txtBuff, "    <td>0x%04x</td>", reachability);
+    sprintf(txtBuff, "    <td>0x%08x</td>", reachability);
     httpClient.println(txtBuff);
     httpClient.println("  </tr>");
     httpClient.println("  <tr>");
@@ -636,7 +636,7 @@ void httpRequestHandler()
 void httpClockState()
 {
     httpHeaderTop();
-    httpClient.printf("%s|%d|%s|0x%04x|%d|", clockConfig.ssid, WiFi.RSSI(), clockConfig.ntpServer, reachability, reSyncCount);
+    httpClient.printf("%s|%d|%s|0x%08x|%d|", clockConfig.ssid, WiFi.RSSI(), clockConfig.ntpServer, reachability, reSyncCount);
     if(ntpSyncState == HIGH)
     {
         httpClient.print("YES");

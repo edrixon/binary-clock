@@ -31,6 +31,7 @@ typedef struct
     int tm_wday;
     int tm_yday;
     int tm_isdst;
+    char *timeName;
 } timeNow_t;
 
 // Configuration data

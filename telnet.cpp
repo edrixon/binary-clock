@@ -183,7 +183,7 @@ void telnetShowStatus(WiFiClient client)
     client.print("NTP server: ");
     client.println(clockConfig.ntpServer);
 
-    sprintf(buff, "Reachability: 0x%04x (0b", reachability);
+    sprintf(buff, "Reachability: 0x%08x (0b", reachability);
     client.print(buff);
     binToStr(reachability, buff, 16);
     strcat(buff, ")");

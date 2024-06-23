@@ -77,8 +77,6 @@ TimeChangeRule ukBST = { "BST", Last, Sun, Mar, 2, 60 };
 TimeChangeRule ukGMT = { "GMT", Last, Sun, Oct, 2, 0 };
 Timezone ukTime(ukGMT, ukBST);
 
-char *timeName;
-
 int ntpUpdates;
 int ntpTimeouts;
 
@@ -564,7 +562,7 @@ void serialShowTime(timeNow_t *timeStruct)
                   
     Serial.print(" - ");
 
-    sprintf(timeString, "%02d:%02d:%02d %s", timeStruct -> tm_hour, timeStruct -> tm_min, timeStruct -> tm_sec, timeName);
+    sprintf(timeString, "%02d:%02d:%02d %s", timeStruct -> tm_hour, timeStruct -> tm_min, timeStruct -> tm_sec, timeStruct -> timeName);
     Serial.println(timeString);    
 }
 
@@ -823,7 +821,7 @@ void correctTime()
     // convert to uk time with bst or gmt
     epoch = ukTime.toLocal(epoch, &tcr);
     dayOfMonth = splitTime(epoch, &timeNow);
-    timeName = tcr -> abbrev;
+    timeNow.timeName = tcr -> abbrev;
             
     // Reset reSyncCount when day changes
     if(dayOfMonth != timeNow.tm_mday)
