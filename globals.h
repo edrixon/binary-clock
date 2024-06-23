@@ -47,7 +47,7 @@ WiFiClient telnetClient;
 ESPTelnet telnet;
 #endif
 
-unsigned char reachability;
+unsigned int reachability;
 int reSyncCount;       // re-sync's since midnight
 
 int updateTime;
@@ -78,7 +78,7 @@ extern ESPTelnet telnet;
 #endif
 extern int updateTime;
 extern int reSyncCount;
-extern unsigned char reachability;
+extern unsigned int reachability;
 extern timeNow_t timeNow;
 extern volatile unsigned long int interruptCount;
 extern long ticks;

@@ -176,16 +176,16 @@ void telnetShowStatus(WiFiClient client)
     {
         sprintf(buff, "  Digit %d - 0x%02x - ", c, ledColData[c]);
         client.print(buff);
-        binToStr(ledColData[c], buff);
+        binToStr(ledColData[c], buff, 8);
         client.println(buff);
     }
 
     client.print("NTP server: ");
     client.println(clockConfig.ntpServer);
 
-    sprintf(buff, "Reachability: 0x%02x (0b", reachability);
+    sprintf(buff, "Reachability: 0x%04x (0b", reachability);
     client.print(buff);
-    binToStr(reachability, buff);
+    binToStr(reachability, buff, 16);
     strcat(buff, ")");
     client.println(buff);
 

@@ -313,9 +313,9 @@ void cmdShowState()
     CLI_DEV.print(interruptCount);
     CLI_DEV.println("");
 
-    sprintf(tmpStr, "Reachability: 0x%02x (0b", reachability);
+    sprintf(tmpStr, "Reachability: 0x%04x (0b", reachability);
     CLI_DEV.print(tmpStr);
-    binToStr(reachability, tmpStr);
+    binToStr(reachability, tmpStr, 16);
     CLI_DEV.print(tmpStr);
     CLI_DEV.println(")");
 

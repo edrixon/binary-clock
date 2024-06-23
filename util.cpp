@@ -30,11 +30,11 @@ boolean chimesEnabled()
 }
 
 // Convert a number to binary in ASCII
-void binToStr(int bin, char *str)
+void binToStr(unsigned int bin, char *str, int len)
 {
     int c;
 
-    for(c = 0; c < 8; c++)
+    for(c = 0; c < len; c++)
     {
         if((bin & 0x80) == 0x80)
         {
