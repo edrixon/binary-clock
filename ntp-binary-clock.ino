@@ -77,7 +77,10 @@ TimeChangeRule ukBST = { "BST", Last, Sun, Mar, 2, 60 };
 TimeChangeRule ukGMT = { "GMT", Last, Sun, Oct, 2, 0 };
 Timezone ukTime(ukGMT, ukBST);
 
+char *timeName;
+
 int ntpUpdates;
+int ntpTimeouts;
 
 int tickTime;
 
@@ -541,7 +544,7 @@ void checkFwUpdate()
 
 #endif
 
-void serialShowTime(timeNow_t *timeStruct, char *timeName)
+void serialShowTime(timeNow_t *timeStruct)
 {
     int screen;
     int digit;
@@ -756,15 +759,14 @@ void resetTickTime()
     lastMillis = millis();
 }
 
-boolean updateClock()
+clockStateType updateClock()
 {
-    boolean rtn;
+    clockStateType rtn;
 
-    rtn = false;
+    rtn = STATE_STOPPED;
     
     if(WiFi.status() == WL_CONNECTED)
     { 
-        ntpUpdates++;
         reachability = reachability << 1;
         Serial.print("[UPDT] Sending NTP update time request - ");
         Serial.println(ntpUpdates);
@@ -775,17 +777,29 @@ boolean updateClock()
             Serial.println("[UPDT] NTP response received");
             reachability = reachability | 0x01;
 
+            ntpUpdates++;
+            ntpTimeouts = 0;
             if(ntpUpdates == clockConfig.syncValid)
             {
                 syncLed(HIGH);
                 updateTime = clockConfig.syncUpdate;
             }
 
-            rtn = true;
+            rtn = STATE_TIMING;
         }
         else
         {
             Serial.println("[UPDT] Timedout waiting for NTP response");
+
+            ntpTimeouts++;
+            ntpUpdates = 0;
+            updateTime = clockConfig.initUpdate;
+            syncLed(LOW);
+
+            if(ntpTimeouts < MAX_NTP_TIMEOUTS)
+            {
+                rtn = STATE_TIMING;
+            }
         }
     }
     else
@@ -809,15 +823,13 @@ void correctTime()
     // convert to uk time with bst or gmt
     epoch = ukTime.toLocal(epoch, &tcr);
     dayOfMonth = splitTime(epoch, &timeNow);
+    timeName = tcr -> abbrev;
             
     // Reset reSyncCount when day changes
     if(dayOfMonth != timeNow.tm_mday)
     {
         reSyncCount = 0;
     }
-
-    // send everything to serial port
-    serialShowTime(&timeNow, tcr -> abbrev);
 }
 
 boolean handleButtons()
@@ -883,6 +895,7 @@ void startNtpClient()
     timeClient.begin(NTP_PORT);
     updateTime = clockConfig.initUpdate;
     ntpUpdates = 0;
+    ntpTimeouts = 0;
 }
 
 #ifdef __WITH_TELNET_CLI
@@ -1187,6 +1200,7 @@ void loop()
 #endif
                     
                     Serial.print(". ");
+                    delay(100);
                     resetTickTime();
                 }
             }
@@ -1201,24 +1215,24 @@ void loop()
                 if(ticks == 0)
                 {
                     // Send NTP time request
-                    if(updateClock() == true)
+                    clockState = updateClock();
+                    if(clockState == STATE_TIMING)
                     {
                         ticks = updateTime - 1;
                     }
-                    else
-                    {
-                        clockState = STATE_STOPPED;
-                    }                    
                 }
                 else
                 {
                     ticks--;
                 }
 
-                // Apply daylight saving
+                // Apply daylight saving and load LED data
                 correctTime();
-                
-                lastMillis = millis();
+
+                // send everything to serial port
+                serialShowTime(&timeNow);
+
+                resetTickTime();
             }
                 
             if(handleButtons() == false)

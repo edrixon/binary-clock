@@ -16,8 +16,8 @@
 #define __WITH_FTP               // To enable simple FTP server
 
 // Software version information
-#define SW_VER         "1.01"
-#define SW_DATE        "May 2024"
+#define SW_VER         "1.02"
+#define SW_DATE        "June 2024"
 
 // Printed on serial port when board starts
 #define HELLO_STR      "** NTP clock by Ed Rixon, GD6XHG **"
@@ -31,6 +31,7 @@
 #define SYNC_UPDATE    900       // number of seconds between NTP polls once stable
 #define INIT_UPDATE    20        // initial time between NTP polls 
 #define SYNC_VALID     5         // How many initial NTP responses needed before "stable"
+#define MAX_NTP_TIMEOUTS 5       // How many NTP timeouts allowed before doing a complete reset
 
 #define TICKTIME       1000      // ms tick time for normal operation of state machine
 
